@@ -43,6 +43,8 @@ setup_args = dict(
     },
 
     install_requires = [
+        'astropy>=4',
+        'sep>=1.1',
     ],
 
     extras_require = {

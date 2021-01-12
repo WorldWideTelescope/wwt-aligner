@@ -24,6 +24,11 @@ def warn(msg):
 
 def go_getparser(parser):
     parser.add_argument(
+        'fits_path',
+        metavar = 'FITS-PATH',
+        help = 'The path to input FITS file',
+    )
+    parser.add_argument(
         'rgb_path',
         metavar = 'RGB-PATH',
         help = 'The path to input file to solve',
@@ -31,7 +36,11 @@ def go_getparser(parser):
 
 
 def go_impl(settings):
-    print('Hello world!')
+    from .driver import go
+    go(
+        fits_path = settings.fits_path,
+        rgb_path = settings.rgb_path,
+    )
 
 
 # The CLI driver:
