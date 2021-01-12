@@ -1,0 +1,21 @@
+*.py[cod]
+__pycache__/
+.coverage
+MANIFEST
+.ipynb_checkpoints
+
+# Sphinx
+docs/api
+docs/_build
+
+# Packages/installer info
+*.egg
+*.egg-info
+*.whl
+dist/
+build/
+eggs/
+parts/
+sdist/
+develop-eggs/
+.installed.cfg

@@ -1,0 +1,22 @@
+include *.md
+include *.rst
+include pyproject.toml
+
+include setup.py
+include .coveragerc
+
+# Documentation
+graft docs
+exclude docs/\#*
+prune docs/build
+prune docs/dist
+
+# Tests
+graft tests
+
+# Patterns to exclude from any directory
+global-exclude *~
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude .git
+global-exclude .ipynb_checkpoints
