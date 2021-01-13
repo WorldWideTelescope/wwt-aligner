@@ -108,9 +108,9 @@ macro_rules! atry {
     };
 
     ($op:expr ; $( $annotation:tt )+) => {{
-        use $crate::anyhow::Context;
+        use anyhow::Context;
         $op.with_context(|| {
-            let mut ar = $crate::AnnotatedMessage::default();
+            let mut ar = $crate::errors::AnnotatedMessage::default();
             $(
                 atry!(@aa ar $annotation);
             )+
@@ -127,7 +127,7 @@ macro_rules! a_ok_or {
     ($option:expr ; $( $annotation:tt )+) => {{
         use $crate::atry;
         $option.ok_or_else(|| {
-            let mut ar = $crate::AnnotatedMessage::default();
+            let mut ar = $crate::errors::AnnotatedMessage::default();
             $(
                 atry!(@aa ar $annotation);
             )+

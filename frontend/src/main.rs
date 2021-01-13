@@ -5,8 +5,10 @@
 //! that invokes the backend "agent" inside a Docker container, mapping things
 //! like filesystem paths.
 
+use std::path::PathBuf;
 use structopt::StructOpt;
 
+mod docker;
 mod errors;
 
 use errors::Result;
@@ -51,12 +53,40 @@ fn main() {
 // go
 
 #[derive(Debug, PartialEq, StructOpt)]
-struct GoCommand {}
+struct GoCommand {
+    filenames: Vec<PathBuf>,
+}
 
 impl Command for GoCommand {
-    fn execute(self) -> Result<i32> {
-        println!("Hello, world!");
-        Ok(0)
+    fn execute(mut self) -> Result<i32> {
+        let mut db = docker::DockerBuilder::default();
+
+        db.arg("wwt-aligner-agent");
+        db.arg("go");
+
+        for path in self.filenames.drain(..) {
+            db.file_arg(path)?;
+        }
+
+        let mut cmd = db.into_command();
+        let status = atry!(
+            cmd.status();
+            ["failed to launch the Docker command: {:?}", cmd]
+        );
+
+        let c = match status.code() {
+            Some(0) => 0,
+            Some(c) => {
+                eprintln!("error: the Docker command signaled failure");
+                c
+            }
+            None => {
+                eprintln!("error: the Docker command exited unexpectedly");
+                1
+            }
+        };
+
+        Ok(c)
     }
 }
 
