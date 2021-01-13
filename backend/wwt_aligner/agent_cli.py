@@ -5,7 +5,9 @@
 
 """
 import argparse
+import shutil
 import sys
+import tempfile
 
 __all__ = ['entrypoint']
 
@@ -37,10 +39,14 @@ def go_getparser(parser):
 
 def go_impl(settings):
     from .driver import go
+
+    work_dir = tempfile.mkdtemp()
     go(
         fits_path = settings.fits_path,
         rgb_path = settings.rgb_path,
+        work_dir = work_dir,
     )
+    shutil.rmtree(work_dir)
 
 
 # The CLI driver:

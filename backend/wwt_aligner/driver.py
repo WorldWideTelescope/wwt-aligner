@@ -37,6 +37,8 @@ def image_size_to_anet_preset(size_deg):
 def go(
     fits_path = None,
     rgb_path = None,
+    work_dir = '',
+    anet_bin_prefix = '',
 ):
     """
     Do the whole thing.
@@ -75,23 +77,21 @@ def go(
     bkg.subfrom(data)
     objects = sep.extract(data, 3, err=bkg.globalrms)
     print('SEP object count:', len(objects))
-    print('columns:', objects.dtype.names)
-    print('first object:', objects[0])
 
     coords = wcs.pixel_to_world(objects['x'], objects['y'])
     tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
 
     print('XXX hardcoded object table name')
-    objects_fits = 'objects.fits'
+    objects_fits = os.path.join(work_dir, 'objects.fits')
     tbl.write(objects_fits, format='fits', overwrite=True)
 
     # Generate the Astrometry.Net index
 
-    index_fits = 'index.fits'
+    index_fits = os.path.join(work_dir, 'index.fits')
     print('XXX hardcoded index FITS table name')
 
     argv = [
-        '/a/wwt/aligner/astrometry.net/solver/build-astrometry-index', # XXXX
+        anet_bin_prefix + 'build-astrometry-index',
         '-i', objects_fits,
         '-o', index_fits,
         '-E',  # objects table is much less than all-sky
@@ -103,12 +103,11 @@ def go(
 
     # Write out config file
 
-    index_dir = os.getcwd()
-    cfg_path = 'aligner.cfg'
+    cfg_path = os.path.join(work_dir, 'aligner.cfg')
     print('XXX hardcoded config file')
 
     with open(cfg_path, 'wt') as f:
-        print('add_path', index_dir, file=f)
+        print('add_path', work_dir, file=f)
         print('inparallel', file=f)
         print('index', index_fits, file=f)
 
@@ -118,14 +117,17 @@ def go(
     # contain NAXIS data. It would be nice if we could because it's small and we
     # could avoid rewriting the full image data. XXXX: use IMAGEW, IMAGEH.
 
-    wcs_file = 'solved.fits'
+    wcs_file = os.path.join(work_dir, 'solved.fits')
 
+    # https://manpages.debian.org/testing/astrometry.net/solve-field.1.en.html
     argv = [
-        '/a/wwt/aligner/astrometry.net/solver/solve-field', # XXXX
+        anet_bin_prefix + 'solve-field',
         '--config', cfg_path,
         '--scale-units', 'arcminwidth',
         '--scale-low', str(width.arcmin / 2),
         '--scale-high', str(width.arcmin * 2),
+        '--cpulimit', '600',  # seconds
+        '--dir', work_dir,
         '-N', wcs_file,
         '--no-plots',
         '--no-tweak',
