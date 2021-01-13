@@ -7,3 +7,9 @@ readme = "README.md"
 license = "MIT"
 
 [dependencies]
+anyhow = "^1.0"
+structopt = "^0.3"
+
+[[bin]]
+name = "wwt-aligner"
+path = "src/main.rs"
