@@ -49,7 +49,9 @@ RUN apt -y update \
 RUN for x in \
         fitsio \
         astropy \
+        pyavm \
         sep \
+        toasty \
     ; do pip3 install --no-cache-dir $x; done
 
 RUN mkdir /src

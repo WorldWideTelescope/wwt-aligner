@@ -11,9 +11,14 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 import math
-import os
+import os.path
+from pyavm import AVM
 import sep
 import subprocess
+from toasty.builder import Builder
+from toasty.image import ImageLoader
+from toasty.merge import averaging_merger, cascade_images
+from toasty.pyramid import PyramidIO
 
 
 def image_size_to_anet_preset(size_deg):
@@ -108,8 +113,12 @@ def go(
         print('index', index_fits, file=f)
 
     # Solve our input image
+    #
+    # XXX we can't use the "WCS" file super conveniently because it doesn't
+    # contain NAXIS data. It would be nice if we could because it's small and we
+    # could avoid rewriting the full image data.
 
-    wcs_file = 'wcs.fits'
+    wcs_file = 'solved.fits'
 
     argv = [
         '/a/wwt/aligner/astrometry.net/solver/solve-field', # XXXX
@@ -117,7 +126,46 @@ def go(
         '--scale-units', 'arcminwidth',
         '--scale-low', str(width.arcmin / 2),
         '--scale-high', str(width.arcmin * 2),
-        '-W', wcs_file,
+        '-N', wcs_file,
         rgb_path,
     ]
     subprocess.check_call(argv, shell=False)
+
+    # Convert solution to AVM
+
+    with fits.open(wcs_file) as hdul:
+        header = hdul[0].header
+        wcs = WCS(header)
+        avm = AVM.from_header(header, include_full_header=False)
+
+    # Apply
+
+    in_name_pieces = os.path.splitext(os.path.basename(rgb_path))
+    out_name = in_name_pieces[0] + '_tagged' + in_name_pieces[1]
+    print('Writing to:', out_name)
+    avm.embed(rgb_path, out_name)
+
+    # Basic toasty tiling
+
+    print('basic tiling ...')
+    tile_dir = in_name_pieces[0] + '_tiled'
+
+    img = ImageLoader().load_path(rgb_path)
+    pio = PyramidIO(tile_dir, default_format=img.default_format)
+    builder = Builder(pio)
+    builder.make_thumbnail_from_other(img)
+    builder.tile_base_as_study(img, cli_progress=True)
+    builder.apply_wcs_info(wcs, img.width, img.height)
+    builder.set_name(in_name_pieces[0])
+    builder.write_index_rel_wtml()
+
+    print('cascading ...')
+    cascade_images(
+        pio,
+        builder.imgset.tile_levels,
+        averaging_merger,
+        cli_progress=True
+    )
+
+    print()
+    print(f'try:    wwtdatatool preview {tile_dir}/index_rel.wtml')
