@@ -116,7 +116,7 @@ def go(
     #
     # XXX we can't use the "WCS" file super conveniently because it doesn't
     # contain NAXIS data. It would be nice if we could because it's small and we
-    # could avoid rewriting the full image data.
+    # could avoid rewriting the full image data. XXXX: use IMAGEW, IMAGEH.
 
     wcs_file = 'solved.fits'
 
@@ -127,18 +127,29 @@ def go(
         '--scale-low', str(width.arcmin / 2),
         '--scale-high', str(width.arcmin * 2),
         '-N', wcs_file,
+        '--no-plots',
+        '--no-tweak',
         rgb_path,
     ]
     subprocess.check_call(argv, shell=False)
 
-    # Convert solution to AVM
+    # Convert solution to AVM, with hardcoded parity
+    # inversion
+
+    img = ImageLoader().load_path(rgb_path)
 
     with fits.open(wcs_file) as hdul:
         header = hdul[0].header
         wcs = WCS(header)
-        avm = AVM.from_header(header, include_full_header=False)
 
-    # Apply
+    hdwork = wcs.to_header()
+    hdwork['CRPIX2'] = img.height + 1 - hdwork['CRPIX2']
+    hdwork['PC1_2'] *= -1
+    hdwork['PC2_2'] *= -1
+    wcs = WCS(hdwork)
+    avm = AVM.from_wcs(wcs)
+
+    # Apply AVM
 
     in_name_pieces = os.path.splitext(os.path.basename(rgb_path))
     out_name = in_name_pieces[0] + '_tagged' + in_name_pieces[1]
@@ -150,7 +161,6 @@ def go(
     print('basic tiling ...')
     tile_dir = in_name_pieces[0] + '_tiled'
 
-    img = ImageLoader().load_path(rgb_path)
     pio = PyramidIO(tile_dir, default_format=img.default_format)
     builder = Builder(pio)
     builder.make_thumbnail_from_other(img)
