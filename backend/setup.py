@@ -34,11 +34,10 @@ setup_args = dict(
     packages = [
         'wwt_aligner',
     ],
-    install_package_data = True,
 
     entry_points = {
         'console_scripts': [
-            'wwt-aligner=wwt_aligner.cli:entrypoint',
+            'wwt-aligner-agent=wwt_aligner.agent_cli:entrypoint',
         ]
     },
 

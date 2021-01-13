@@ -110,4 +110,4 @@ RUN apt -y update \
 
 COPY --from=build /usr/local /usr/local
 RUN ln -s /usr/bin/python3 /usr/bin/python
-CMD ["wwt-aligner"]
+CMD ["wwt-aligner-agent"]
