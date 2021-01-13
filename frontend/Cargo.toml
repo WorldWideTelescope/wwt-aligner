@@ -1,0 +1,9 @@
+[package]
+name = "wwt-aligner-frontend"
+version = "0.1.0"
+authors = ["AAS WorldWide Telescope <wwt@aas.org>"]
+edition = "2018"
+readme = "README.md"
+license = "MIT"
+
+[dependencies]
