@@ -1,0 +1,50 @@
+# Copyright 2020 the .NET Foundation
+# Licensed under the MIT License
+
+# Apply versions and create Cranko release commit.
+
+jobs:
+
+- job: apply_versions
+  pool:
+    vmImage: ubuntu-20.04
+
+  steps:
+
+  - checkout: self
+
+  - bash: |
+      set -euo pipefail
+      d="$(mktemp -d /tmp/cranko.XXXXXX)"
+      cd "$d"
+      curl --proto '=https' --tlsv1.2 -sSf https://pkgw.github.io/cranko/fetch-latest.sh | sh
+      echo "##vso[task.prependpath]$d"
+    displayName: Install latest Cranko
+
+  - bash: cranko release-workflow apply-versions
+    displayName: Apply versions with Cranko
+
+  - bash: |
+      set -xeuo pipefail
+      cd frontend
+      cargo metadata --quiet
+    displayName: Update package metadata
+
+  - bash: |
+      set -xeuo pipefail
+      git add .
+      cranko release-workflow commit
+      git show
+    displayName: Make release commit
+
+  - bash: |
+      artifact_dir="$(Build.ArtifactStagingDirectory)/git-release"
+      mkdir -p "$artifact_dir"
+      git bundle create "$artifact_dir/release.bundle" origin/master..HEAD
+    displayName: Bundle release commit
+
+  - task: PublishPipelineArtifact@1
+    displayName: Publish release git bundle artifact
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)/git-release'
+      artifactName: git-release

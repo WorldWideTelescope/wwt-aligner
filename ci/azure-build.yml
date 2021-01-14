@@ -1,0 +1,80 @@
+# Copyright 2020 the .NET Foundation
+# Licensed under the MIT License
+
+# Main Azure Pipelines build jobs: create Docker image and frontend executables
+
+parameters:
+- name: frontend_builds
+  type: object
+  default:
+
+  - name: linux_stable
+    vmImage: ubuntu-20.04
+    vars:
+      TARGET: x86_64-unknown-linux-gnu
+      TOOLCHAIN: stable
+
+  - name: macos_stable
+    vmImage: macos-10.15
+    vars:
+      TARGET: x86_64-apple-darwin
+      TOOLCHAIN: stable
+
+jobs:
+- ${{ each build in parameters.frontend_builds }}:
+  - job: ${{ format('frontend_{0}', build.name) }}
+    pool:
+      vmImage: ${{ build.vmImage }}
+    variables:
+      ${{ insert }}: ${{ build.vars }}
+    steps:
+
+    - template: azure-job-setup.yml
+      parameters:
+        setupBuild: true
+
+    - bash: |
+        set -xeuo pipefail
+        cd frontend
+        cargo build --release --all
+      displayName: cargo build
+
+    - bash: |
+        set -xeuo pipefail
+        cd frontend
+        cargo build --release --all
+      displayName: cargo test
+
+    - bash: |
+        artifact_dir="$ARTIFACT_STAGING/binary-$TARGET"
+        mkdir -p "$artifact_dir"
+        cranko cargo package-released-binaries -t $TARGET $artifact_dir -- build --release
+      displayName: Package binaries
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish packaged binary artifact(s)
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)/binary-$(TARGET)'
+        artifactName: binary-$(TARGET)
+
+- job: docker_image
+  pool:
+    vmImage: ubuntu-20.04
+  steps:
+  - template: azure-job-setup.yml
+
+  - bash: |
+      set -xeuo pipefail
+      cd backend
+      docker build -t aasworldwidetelescope/aligner:latest .
+    displayName: Builder Docker image
+
+  - bash: |
+      docker image save aasworldwidetelescope/aligner:latest -o $ARTIFACT_STAGING/aligner.tar
+    displayName: Export image
+
+  - task: PublishPipelineArtifact@1
+    displayName: Publish image as artifact
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)'
+      artifactName: docker-image
