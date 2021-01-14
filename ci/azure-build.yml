@@ -48,6 +48,7 @@ jobs:
     - bash: |
         artifact_dir="$ARTIFACT_STAGING/binary-$TARGET"
         mkdir -p "$artifact_dir"
+        cd frontend
         cranko cargo package-released-binaries -t $TARGET $artifact_dir -- build --release
       displayName: Package binaries
 
