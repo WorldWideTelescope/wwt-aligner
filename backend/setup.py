@@ -33,6 +33,7 @@ setup_args = dict(
 
     packages = [
         'wwt_aligner',
+        'wwt_aligner.tests',
     ],
 
     entry_points = {
@@ -43,7 +44,9 @@ setup_args = dict(
 
     install_requires = [
         'astropy>=4',
+        'pyavm>=0.9',
         'sep>=1.1',
+        'toasty>=0.4',
     ],
 
     extras_require = {
