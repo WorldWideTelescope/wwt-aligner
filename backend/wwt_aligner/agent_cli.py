@@ -26,6 +26,11 @@ def warn(msg):
 
 def go_getparser(parser):
     parser.add_argument(
+        '--anet-bin-prefix',
+        default = '',
+        help = 'A prefix to apply to the names of Astrometry.Net programs to run',
+    )
+    parser.add_argument(
         'fits_path',
         metavar = 'FITS-PATH',
         help = 'The path to input FITS file',
@@ -45,6 +50,7 @@ def go_impl(settings):
         fits_path = settings.fits_path,
         rgb_path = settings.rgb_path,
         work_dir = work_dir,
+        anet_bin_prefix = settings.anet_bin_prefix,
     )
     shutil.rmtree(work_dir)
 
