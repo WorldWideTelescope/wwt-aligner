@@ -1,0 +1,13 @@
+[[project]]
+qnames = [
+    'wwt_aligner',
+    'pypa',
+]
+version = '0.dev0'
+
+[[project]]
+qnames = [
+    'wwt-aligner-frontend',
+    'cargo',
+]
+version = '0.1.0'
