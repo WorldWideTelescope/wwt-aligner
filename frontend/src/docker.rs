@@ -7,7 +7,7 @@ use std::{collections::HashMap, ffi::{OsStr, OsString}, path::{Path, PathBuf}, p
 
 use crate::{a_ok_or, atry, errors::Result};
 
-const DEFAULT_IMAGE_NAME: &str = "aligner:latest";  // XXX
+const DEFAULT_IMAGE_NAME: &str = "aasworldwidetelescope/aligner:latest";
 
 /// Helper for constructing Docker command lines.
 #[derive(Debug)]
