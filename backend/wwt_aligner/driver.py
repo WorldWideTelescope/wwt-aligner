@@ -131,6 +131,7 @@ def go(
         '-N', wcs_file,
         '--no-plots',
         '--no-tweak',
+        '--downsample', '2',
         rgb_path,
     ]
     subprocess.check_call(argv, shell=False)
