@@ -70,25 +70,25 @@ def go(
 
     # Use SEP to find sources
 
+    print('Finding sources in', fits_path, '...')
+
     bkg = sep.Background(data)
-    print('SEP background level:', bkg.globalback)
-    print('SEP background rms:', bkg.globalrms)
+    #print('SEP background level:', bkg.globalback)
+    #print('SEP background rms:', bkg.globalrms)
 
     bkg.subfrom(data)
     objects = sep.extract(data, 3, err=bkg.globalrms)
-    print('SEP object count:', len(objects))
+    #print('SEP object count:', len(objects))
 
     coords = wcs.pixel_to_world(objects['x'], objects['y'])
     tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
 
-    print('XXX hardcoded object table name')
     objects_fits = os.path.join(work_dir, 'objects.fits')
     tbl.write(objects_fits, format='fits', overwrite=True)
 
     # Generate the Astrometry.Net index
 
     index_fits = os.path.join(work_dir, 'index.fits')
-    print('XXX hardcoded index FITS table name')
 
     argv = [
         anet_bin_prefix + 'build-astrometry-index',
@@ -99,12 +99,21 @@ def go(
         '-S', 'FLUX',
         '-P', str(image_size_to_anet_preset(large_scale.deg))
     ]
-    subprocess.check_call(argv, shell=False)
+
+    index_log = os.path.join(work_dir, 'build-index.log')
+    print('Generating Astrometry.Net index ...')
+
+    with open(index_log, 'wb') as log:
+        subprocess.check_call(
+            argv,
+            stdout = log,
+            stderr = subprocess.STDOUT,
+            shell = False,
+        )
 
     # Write out config file
 
     cfg_path = os.path.join(work_dir, 'aligner.cfg')
-    print('XXX hardcoded config file')
 
     with open(cfg_path, 'wt') as f:
         print('add_path', work_dir, file=f)
@@ -134,7 +143,17 @@ def go(
         '--downsample', '2',
         rgb_path,
     ]
-    subprocess.check_call(argv, shell=False)
+
+    solve_log = os.path.join(work_dir, 'solve-field.log')
+    print('Launching Astrometry.Net solver ...')
+
+    with open(solve_log, 'wb') as log:
+        subprocess.check_call(
+            argv,
+            stdout = log,
+            stderr = subprocess.STDOUT,
+            shell = False,
+        )
 
     # Convert solution to AVM, with hardcoded parity
     # inversion
@@ -156,7 +175,7 @@ def go(
 
     in_name_pieces = os.path.splitext(os.path.basename(rgb_path))
     out_name = in_name_pieces[0] + '_tagged' + in_name_pieces[1]
-    print('Writing to:', out_name)
+    print('Writing AVM image to:', out_name)
     avm.embed(rgb_path, out_name)
 
     # Basic toasty tiling
@@ -180,5 +199,4 @@ def go(
         cli_progress=True
     )
 
-    print()
-    print(f'try:    wwtdatatool preview {tile_dir}/index_rel.wtml')
+    print(f'try:   wwtdatatool preview {tile_dir}/index_rel.wtml')
