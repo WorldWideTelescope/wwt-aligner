@@ -1,0 +1,79 @@
+# Copyright 2020 the .NET Foundation
+# Licensed under the MIT License
+
+# Deployment workflows, run when all CI tests pass on the a push to the `rc`
+# branch.
+
+jobs:
+
+- job: branch_and_tag
+  pool:
+    vmImage: ubuntu-20.04
+  variables:
+  - group: Deployment Credentials
+  steps:
+  - template: azure-job-setup.yml
+    parameters:
+      setupGit: true
+  - bash: |
+      set -xeou pipefail
+      cranko release-workflow tag
+      git push --tags origin release:release
+    displayName: Tag and push
+    env:
+      GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+- job: github_releases
+  dependsOn: branch_and_tag # otherwise, GitHub creates the tag itself
+  pool:
+    vmImage: ubuntu-20.04
+  variables:
+  - group: Deployment Credentials
+  steps:
+  - template: azure-job-setup.yml
+    parameters:
+      setupGit: true
+  - bash: |
+      set -xeou pipefail
+      cranko github create-releases
+    displayName: Create GitHub releases
+    env:
+      GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+- job: docker_push
+  pool:
+    vmImage: ubuntu-20.04
+  variables:
+  - group: Deployment Credentials
+  steps:
+  - template: azure-job-setup.yml
+
+  # Set the "deployment tag" for the Docker image. The variable
+  # $DOCKER_DEPLOYMENT_TAG is set to "skip", if we shouldn't release it, or the
+  # major version number, if we should. The Docker image versioning tracks the
+  # Python backend package.
+  - bash: |
+      set -euo pipefail
+      if cranko show if-released --exit-code wwt_aligner ; then
+        tag="$(cranko show version wwt_aligner |cut -d. -f1)"
+      else
+        tag=skip
+      fi
+      echo "Docker deployment tag: $tag"
+      echo "##vso[task.setvariable variable=DOCKER_DEPLOYMENT_TAG;]$tag"
+    displayName: Determine deployment tag
+
+  - bash: docker image load -i $ARTIFACT_STAGING/aligner.tar
+    displayName: Import Docker image
+    condition: and(succeeded(), ne(variables['DOCKER_DEPLOYMENT_TAG'], 'skip'))
+
+  - task: Docker@2
+    displayName: Deploy Docker image
+    condition: and(succeeded(), ne(variables['DOCKER_DEPLOYMENT_TAG'], 'skip'))
+    inputs:
+      containerRegistry: 'worldwidetelescope@DockerHub'
+      repository: 'aasworldwidetelescope/aligner'
+      command: 'push'
+      tags: |
+        $(DOCKER_DEPLOYMENT_TAG)
+        latest

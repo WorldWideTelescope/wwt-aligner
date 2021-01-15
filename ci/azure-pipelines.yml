@@ -16,10 +16,8 @@ stages:
   jobs:
   - template: azure-build.yml
 
-# - stage: Deploy
-#   condition: and(succeeded('MainBuild'), ne(variables['build.reason'], 'PullRequest'))
-#   jobs:
-#   - template: azure-deployment.yml
-#     parameters:
-#       isMainDev: ${{ ne(variables['Build.SourceBranchName'], 'rc') }}
-#       isRelease: ${{ eq(variables['Build.SourceBranchName'], 'rc') }}
+# Only deploy on pushes to `rc`.
+- stage: Deploy
+  condition: and(succeeded('MainBuild'), ne(variables['build.reason'], 'PullRequest'), eq(variables['Build.SourceBranchName'], 'rc'))
+  jobs:
+  - template: azure-deployment.yml
