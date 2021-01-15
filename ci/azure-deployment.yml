@@ -63,7 +63,10 @@ jobs:
       echo "##vso[task.setvariable variable=DOCKER_DEPLOYMENT_TAG;]$tag"
     displayName: Determine deployment tag
 
-  - bash: docker image load -i $PIPELINE_WORKSPACE/docker-image/aligner.tar
+  - bash: |
+      set -xeuo pipefail
+      docker image load -i $PIPELINE_WORKSPACE/docker-image/aligner.tar
+      docker tag aasworldwidetelescope/aligner:latest aasworldwidetelescope/aligner:$DOCKER_DEPLOYMENT_TAG
     displayName: Import Docker image
     condition: and(succeeded(), ne(variables['DOCKER_DEPLOYMENT_TAG'], 'skip'))
 
