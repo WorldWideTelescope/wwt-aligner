@@ -39,7 +39,7 @@ jobs:
 
       if cranko show if-released --exit-code wwt-aligner-frontend; then
         cranko github upload-artifacts wwt-aligner-frontend \
-          $(Pipeline.Workspace)/binary-*/* \
+          $(Pipeline.Workspace)/binary-*/*
       fi
     displayName: Create GitHub releases
     env:
