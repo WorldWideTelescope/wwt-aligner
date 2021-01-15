@@ -36,6 +36,11 @@ jobs:
   - bash: |
       set -xeou pipefail
       cranko github create-releases
+
+      if cranko show if-released --exit-code wwt-aligner-frontend; then
+        cranko github upload-artifacts wwt-aligner-frontend \
+          $(Pipeline.Workspace)/binary-*/* \
+      fi
     displayName: Create GitHub releases
     env:
       GITHUB_TOKEN: $(GITHUB_TOKEN)
