@@ -1,6 +1,6 @@
 [package]
 name = "wwt-aligner-frontend"
-version = "0.0.0-dev.0"
+version = "0.1.0"
 authors = ["AAS WorldWide Telescope <wwt@aas.org>"]
 edition = "2018"
 readme = "README.md"
