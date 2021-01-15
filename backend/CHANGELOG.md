@@ -1,17 +1,8 @@
-# rc: micro bump
+# See elsewhere for changelog
 
-No code changes, trying Docker deployment again.
+This project’s release notes are curated from the Git history of its main
+branch. You can find them by looking at [the version of this file on the
+`release` branch][branch] or the [GitHub release history][gh-releases].
 
-# wwt_aligner 0.3.0 (2021-01-15)
-
-No code changes, trying Docker deployment again.
-
-# wwt_aligner 0.2.0 (2021-01-15)
-
-No code changes, trying Docker deployment again.
-
-# wwt_aligner 0.1.0 (2021-01-15)
-
-Initial prototype release. Note that our release artifact is the built Docker
-image, not the Python module. For the time being we're not even publishing the
-Python module to PyPI.
+[branch]: https://github.com/WorldWideTelescope/wwt-aligner/blob/release/backend/CHANGELOG.md
+[gh-releases]: https://github.com/WorldWideTelescope/wwt-aligner/releases
