@@ -3,10 +3,16 @@
 
 //! Tools for driving Docker.
 
-use std::{collections::HashMap, ffi::{OsStr, OsString}, path::{Path, PathBuf}, process::Command};
+use std::{
+    collections::HashMap,
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use crate::{a_ok_or, atry, errors::Result};
 
+const DOCKER_COMMAND: &str = "docker";
 const DEFAULT_IMAGE_NAME: &str = "aasworldwidetelescope/aligner:latest";
 
 /// Helper for constructing Docker command lines.
@@ -47,13 +53,16 @@ impl DockerBuilder {
             ["cannot convey root-type input path `{}` to Docker", host_path.display()]
         );
 
-        let cnt_dirname = self.host_dirs.entry(host_dirname.to_owned()).or_insert_with(|| {
-            let mut container_dir = PathBuf::new();
-            container_dir.push("/hostdirs");
-            let c = host_dirname.display().to_string().replace("/", "_");
-            container_dir.push(c);
-            container_dir
-        });
+        let cnt_dirname = self
+            .host_dirs
+            .entry(host_dirname.to_owned())
+            .or_insert_with(|| {
+                let mut container_dir = PathBuf::new();
+                container_dir.push("/hostdirs");
+                let c = host_dirname.display().to_string().replace("/", "_");
+                container_dir.push(c);
+                container_dir
+            });
 
         // Note that the file name has to come from the canonicalized path, in
         // case it was a symlink to a file with a different actual name.
@@ -67,7 +76,7 @@ impl DockerBuilder {
     }
 
     pub fn into_command(mut self) -> Command {
-        let mut cmd = Command::new("docker");
+        let mut cmd = Command::new(DOCKER_COMMAND);
 
         cmd.arg("run").arg("--rm");
 
@@ -89,4 +98,11 @@ impl DockerBuilder {
 
         cmd
     }
+}
+
+/// Generate a Command that will update the Docker image.
+pub fn update_command() -> Command {
+    let mut cmd = Command::new(DOCKER_COMMAND);
+    cmd.arg("pull").arg(DEFAULT_IMAGE_NAME);
+    cmd
 }

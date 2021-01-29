@@ -34,6 +34,10 @@ enum Commands {
     #[structopt(name = "help")]
     /// Get help for this tool.
     Help(HelpCommand),
+
+    #[structopt(name = "update")]
+    /// Download the latest version of the alignment software.
+    Update(UpdateCommand),
 }
 
 impl Command for Commands {
@@ -41,6 +45,7 @@ impl Command for Commands {
         match self {
             Commands::Go(o) => o.execute(),
             Commands::Help(o) => o.execute(),
+            Commands::Update(o) => o.execute(),
         }
     }
 }
@@ -106,11 +111,47 @@ impl Command for HelpCommand {
                 Ok(0)
             }
 
-            Some(cmd) => {
-                AlignerFrontendOptions::from_iter(&[&std::env::args().next().unwrap(), cmd, "--help"])
-                    .command
-                    .execute()
-            }
+            Some(cmd) => AlignerFrontendOptions::from_iter(&[
+                &std::env::args().next().unwrap(),
+                cmd,
+                "--help",
+            ])
+            .command
+            .execute(),
         }
+    }
+}
+
+// update
+
+#[derive(Debug, PartialEq, StructOpt)]
+struct UpdateCommand {}
+
+impl Command for UpdateCommand {
+    fn execute(self) -> Result<i32> {
+        println!("Updating the Docker image ...");
+        println!();
+
+        let mut cmd = docker::update_command();
+        let status = atry!(
+            cmd.status();
+            ["failed to launch the Docker command: {:?}", cmd]
+        );
+
+        let c = match status.code() {
+            Some(0) => 0,
+            Some(c) => {
+                eprintln!("error: the Docker command signaled failure");
+                c
+            }
+            None => {
+                eprintln!("error: the Docker command exited unexpectedly");
+                1
+            }
+        };
+
+        println!();
+        println!("Done!");
+        Ok(c)
     }
 }
