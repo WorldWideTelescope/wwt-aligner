@@ -79,3 +79,25 @@ jobs:
     inputs:
       targetPath: '$(Build.ArtifactStagingDirectory)'
       artifactName: docker-image
+
+- job: ghpages
+  pool:
+    vmImage: ubuntu-20.04
+  steps:
+  - template: azure-job-setup.yml
+
+  - bash: www/build.sh
+    displayName: "Build GitHub pages HTML content"
+
+  - bash: |
+      cranko git-util reboot-branch gh-pages www/dist
+      artifact_dir="$(Build.ArtifactStagingDirectory)/git-gh-pages"
+      mkdir -p "$artifact_dir"
+      git bundle create "$artifact_dir/gh-pages.bundle" gh-pages
+    displayName: "Prep new gh-pages branch"
+
+  - task: PublishPipelineArtifact@1
+    displayName: Publish git bundle artifact
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)/git-gh-pages'
+      artifactName: git-gh-pages

@@ -102,3 +102,21 @@ jobs:
       displayName: Create GitHub releases
       env:
         GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+  - job: update_ghpages
+    pool:
+      vmImage: ubuntu-20.04
+    variables:
+      - group: Deployment Credentials
+    steps:
+    - template: azure-job-setup.yml
+      parameters:
+        setupGit: true
+    - bash: |
+        set -xeou pipefail
+        git fetch $(Pipeline.Workspace)/git-gh-pages/gh-pages.bundle gh-pages
+        git branch -f gh-pages FETCH_HEAD
+        git push --force origin gh-pages:gh-pages
+      displayName: Update GitHub pages website
+      env:
+        GITHUB_TOKEN: $(GITHUB_TOKEN)
