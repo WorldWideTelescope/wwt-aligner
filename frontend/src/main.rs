@@ -62,8 +62,8 @@ fn do_other(all_args: Vec<OsString>) -> Result<i32> {
     );
 
     let db = match db {
-        Some(c) => c,
-        None => return Ok(2),
+        docker::AnalysisOutcome::Continue(c) => c,
+        docker::AnalysisOutcome::EarlyExit(c) => return Ok(c),
     };
 
     let mut cmd = db.into_command();

@@ -3,7 +3,7 @@
 
 //! Tools for driving Docker.
 
-use anyhow::ensure;
+use anyhow::{bail, ensure};
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -54,13 +54,18 @@ impl Default for DockerBuilder {
     }
 }
 
+pub enum AnalysisOutcome {
+    Continue(DockerBuilder),
+    EarlyExit(i32),
+}
+
 impl DockerBuilder {
     pub fn arg<S: AsRef<OsStr>>(&mut self, arg: S) -> &mut Self {
         self.inner_args.push(arg.as_ref().to_owned());
         self
     }
 
-    pub fn for_analyzed_command(args: &[OsString]) -> Result<Option<Self>> {
+    pub fn for_analyzed_command(args: &[OsString]) -> Result<AnalysisOutcome> {
         let mut analyze_cmd = Command::new(DOCKER_COMMAND);
         analyze_cmd
             .arg("run")
@@ -81,34 +86,49 @@ impl DockerBuilder {
             ["failed to transfer Docker error output to stderr"]
         );
 
-        if let Some(0) = output.status.code() {
-        } else {
-            if let Some(c) = output.status.code() {
-                if c == 2 {
-                    // Signifies a failure to parse arguments according to
-                    // Python argparse's defaults. In that case, the usage
-                    // message will have already been written to stderr, so
-                    // return a value indicating failure that has already
-                    // been reported.
-                    return Ok(None);
-                }
+        match output.status.code() {
+            // This means that arg-parse worked
+            Some(100) => {}
 
-                // Otherwise, something went unexpectedly wrong.
-
-                eprintln!(
-                    "error: the Docker command signaled failure (error code {})",
-                    c
-                );
-            } else {
-                eprintln!("error: the Docker command exited unexpectedly");
-            }
-
-            if !output.stdout.is_empty() {
-                eprintln!("error: the command's primary output was:\n");
+            Some(0) => {
+                // A `--help` call or something similar. Get stdout out there
+                // and we're done.
                 atry!(
                     io::stderr().write_all(&output.stdout);
                     ["failed to transfer Docker stdout output"]
                 );
+                return Ok(AnalysisOutcome::EarlyExit(0));
+            }
+
+            Some(2) => {
+                // 2 signifies a failure to parse arguments according to Python
+                // argparse's defaults. In this case, the usage message will
+                // have already been written to stderr, so return a value
+                // indicating failure that has already been reported.
+                return Ok(AnalysisOutcome::EarlyExit(2));
+            }
+
+            oc => {
+                if let Some(c) = oc {
+                    // An unexpected bad exit code.
+                    eprintln!(
+                        "error: the Docker command signaled failure (error code {})",
+                        c
+                    );
+                } else {
+                    // Process killed by a signal
+                    eprintln!("error: the Docker command exited unexpectedly");
+                }
+
+                if !output.stdout.is_empty() {
+                    eprintln!("error: the command's primary output was:\n");
+                    atry!(
+                        io::stderr().write_all(&output.stdout);
+                        ["failed to transfer Docker stdout output"]
+                    );
+                }
+
+                bail!("there was a problem setting up to launch the Docker command");
             }
         }
 
@@ -271,7 +291,7 @@ impl DockerBuilder {
             builder.ports.push(port.into());
         }
 
-        Ok(Some(builder))
+        Ok(AnalysisOutcome::Continue(builder))
     }
 
     pub fn into_command(mut self) -> Command {

@@ -264,6 +264,8 @@ def entrypoint(args=None):
             commands.add(cmd_name)
 
     # What did we get?
+    #
+    # Note that if `--help` is given, parse_args() may not return.
 
     settings = parser.parse_args(args)
 
@@ -294,3 +296,4 @@ def entrypoint(args=None):
         aa(builder, settings)
         builder.write_as_json(sys.stdout)
         print()
+        sys.exit(100) # indicates args analysis succeeded
