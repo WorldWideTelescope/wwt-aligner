@@ -90,33 +90,43 @@ fn do_other(all_args: Vec<OsString>) -> Result<i32> {
 // update
 
 #[derive(Debug, PartialEq, StructOpt)]
-struct UpdateCommand {}
+struct UpdateCommand {
+    #[structopt(
+        long = "latest",
+        help = "Update to the \"bleeding edge\" software version"
+    )]
+    latest: bool,
+}
 
 impl Command for UpdateCommand {
     fn execute(self) -> Result<i32> {
-        println!("Updating the Docker image ...");
+        let tag = if self.latest { "latest" } else { "stable" };
+
+        println!("Updating the Docker image to tag \"{}\" ...", tag);
         println!();
 
-        let mut cmd = docker::update_command();
-        let status = atry!(
-            cmd.status();
-            ["failed to launch the Docker command: {:?}", cmd]
-        );
+        for mut cmd in docker::update_commands(tag).drain(..) {
+            let status = atry!(
+                cmd.status();
+                ["failed to launch the Docker command: {:?}", cmd]
+            );
 
-        let c = match status.code() {
-            Some(0) => 0,
-            Some(c) => {
-                eprintln!("error: the Docker command signaled failure");
-                c
-            }
-            None => {
-                eprintln!("error: the Docker command exited unexpectedly");
-                1
-            }
-        };
+            match status.code() {
+                Some(0) => {}
+                Some(c) => {
+                    eprintln!("error: the Docker command signaled failure");
+                    return Ok(c);
+                }
+                None => {
+                    eprintln!("error: the Docker command exited unexpectedly");
+                    return Ok(1);
+                }
+            };
 
-        println!();
+            println!();
+        }
+
         println!("Done!");
-        Ok(c)
+        Ok(0)
     }
 }
