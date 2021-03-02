@@ -1,4 +1,4 @@
-# Copyright 2020 the .NET Foundation
+# Copyright 2020-2021 the .NET Foundation
 # Licensed under the MIT License
 
 """
@@ -12,13 +12,12 @@ from astropy.table import Table
 from astropy.wcs import WCS
 import math
 import os.path
+from PIL import Image as pil_image
 from pyavm import AVM
 import sep
 import subprocess
 from toasty.builder import Builder
 from toasty.image import ImageLoader
-from toasty.merge import averaging_merger, cascade_images
-from toasty.pyramid import PyramidIO
 
 
 def image_size_to_anet_preset(size_deg):
@@ -35,81 +34,89 @@ def image_size_to_anet_preset(size_deg):
 
 
 def go(
-    fits_path = None,
+    fits_paths = None,
     rgb_path = None,
+    output_path = None,
+    tile_path = None,
     work_dir = '',
     anet_bin_prefix = '',
 ):
     """
     Do the whole thing.
     """
+    index_fits_list = []
 
-    # Check our FITS image and get some basic quantities. We need
-    # to read in the data to sourcefind with SEP.
+    for fits_num, fits_path in enumerate(fits_paths):
+        print('Processing reference science image', fits_path, '...')
 
-    with fits.open(fits_path) as hdul:
-        hdu = hdul[0]
-        wcs = WCS(hdu)
-        data = hdu.data
-        height, width = data.shape[-2:]
+        # Check our FITS image and get some basic quantities. We need
+        # to read in the data to sourcefind with SEP.
 
-    data = data.byteswap(inplace=True).newbyteorder()
+        with fits.open(fits_path) as hdul:
+            hdu = hdul[0]
+            wcs = WCS(hdu)
+            data = hdu.data
+            height, width = data.shape[-2:]
 
-    midx = width // 2
-    midy = height // 2
-    coords = wcs.pixel_to_world(
-        [midx, midx + 1, 0, width, 0, width],
-        [midy, midy + 1, 0, height, midy, midy],
-    )
+        data = data.byteswap(inplace=True).newbyteorder()
 
-    small_scale = coords[0].separation(coords[1])
-    #print('small scale:', small_scale)
-    large_scale = coords[2].separation(coords[3])
-    #print('large scale:', large_scale)
-    width = coords[4].separation(coords[5])
-
-    # Use SEP to find sources
-
-    print('Finding sources in', fits_path, '...')
-
-    bkg = sep.Background(data)
-    #print('SEP background level:', bkg.globalback)
-    #print('SEP background rms:', bkg.globalrms)
-
-    bkg.subfrom(data)
-    objects = sep.extract(data, 3, err=bkg.globalrms)
-    #print('SEP object count:', len(objects))
-
-    coords = wcs.pixel_to_world(objects['x'], objects['y'])
-    tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
-
-    objects_fits = os.path.join(work_dir, 'objects.fits')
-    tbl.write(objects_fits, format='fits', overwrite=True)
-
-    # Generate the Astrometry.Net index
-
-    index_fits = os.path.join(work_dir, 'index.fits')
-
-    argv = [
-        anet_bin_prefix + 'build-astrometry-index',
-        '-i', objects_fits,
-        '-o', index_fits,
-        '-E',  # objects table is much less than all-sky
-        '-f',  # our sort column is flux-like, not mag-like
-        '-S', 'FLUX',
-        '-P', str(image_size_to_anet_preset(large_scale.deg))
-    ]
-
-    index_log = os.path.join(work_dir, 'build-index.log')
-    print('Generating Astrometry.Net index ...')
-
-    with open(index_log, 'wb') as log:
-        subprocess.check_call(
-            argv,
-            stdout = log,
-            stderr = subprocess.STDOUT,
-            shell = False,
+        midx = width // 2
+        midy = height // 2
+        coords = wcs.pixel_to_world(
+            [midx, midx + 1, 0, width, 0, width],
+            [midy, midy + 1, 0, height, midy, midy],
         )
+
+        small_scale = coords[0].separation(coords[1])
+        #print('small scale:', small_scale)
+        large_scale = coords[2].separation(coords[3])
+        #print('large scale:', large_scale)
+        width = coords[4].separation(coords[5])
+
+        # Use SEP to find sources
+
+        print('   Finding sources ...')
+
+        bkg = sep.Background(data)
+        #print('SEP background level:', bkg.globalback)
+        #print('SEP background rms:', bkg.globalrms)
+
+        bkg.subfrom(data)
+        objects = sep.extract(data, 3, err=bkg.globalrms)
+        #print('SEP object count:', len(objects))
+
+        coords = wcs.pixel_to_world(objects['x'], objects['y'])
+        tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
+
+        objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
+        tbl.write(objects_fits, format='fits', overwrite=True)
+
+        # Generate the Astrometry.Net index
+
+        index_fits = os.path.join(work_dir, f'index{fits_num}.fits')
+
+        argv = [
+            anet_bin_prefix + 'build-astrometry-index',
+            '-i', objects_fits,
+            '-o', index_fits,
+            '-E',  # objects table is much less than all-sky
+            '-f',  # our sort column is flux-like, not mag-like
+            '-S', 'FLUX',
+            '-P', str(image_size_to_anet_preset(large_scale.deg))
+        ]
+
+        index_log = os.path.join(work_dir, f'build-index-{fits_num}.log')
+        print('   Generating Astrometry.Net index ...')
+
+        with open(index_log, 'wb') as log:
+            subprocess.check_call(
+                argv,
+                stdout = log,
+                stderr = subprocess.STDOUT,
+                shell = False,
+            )
+
+        index_fits_list.append(index_fits)
 
     # Write out config file
 
@@ -118,7 +125,9 @@ def go(
     with open(cfg_path, 'wt') as f:
         print('add_path', work_dir, file=f)
         print('inparallel', file=f)
-        print('index', index_fits, file=f)
+
+        for p in index_fits_list:
+            print('index', p, file=f)
 
     # Solve our input image
     #
@@ -145,7 +154,7 @@ def go(
     ]
 
     solve_log = os.path.join(work_dir, 'solve-field.log')
-    print('Launching Astrometry.Net solver ...')
+    print('Launching Astrometry.Net solver for', rgb_path, '...')
 
     with open(solve_log, 'wb') as log:
         subprocess.check_call(
@@ -172,31 +181,50 @@ def go(
     avm = AVM.from_wcs(wcs)
 
     # Apply AVM
+    #
+    # pyavm can't convert image formats, so if we've been asked to emit a tagged
+    # imagine in a format different than the image format, we need to do that
+    # conversion manually. We're not in a great position to be clever so we
+    # assess "format" from filename extensions.
 
     in_name_pieces = os.path.splitext(os.path.basename(rgb_path))
-    out_name = in_name_pieces[0] + '_tagged' + in_name_pieces[1]
-    print('Writing AVM image to:', out_name)
-    avm.embed(rgb_path, out_name)
 
-    # Basic toasty tiling
+    if output_path is None:
+        output_path = in_name_pieces[0] + '_tagged' + in_name_pieces[1]
 
-    print('basic tiling ...')
-    tile_dir = in_name_pieces[0] + '_tiled'
+    input_ext = in_name_pieces[1].lower()
+    output_ext = os.path.splitext(output_path)[1].lower()
 
-    pio = PyramidIO(tile_dir, default_format=img.default_format)
-    builder = Builder(pio)
-    builder.make_thumbnail_from_other(img)
-    builder.tile_base_as_study(img, cli_progress=True)
-    builder.apply_wcs_info(wcs, img.width, img.height)
-    builder.set_name(in_name_pieces[0])
-    builder.write_index_rel_wtml()
+    if input_ext != output_ext:
+        print('Converting input image to create:', output_path)
+        img.save(output_path, format=output_ext.replace('.', ''))
 
-    print('cascading ...')
-    cascade_images(
-        pio,
-        builder.imgset.tile_levels,
-        averaging_merger,
-        cli_progress=True
-    )
+        print('Adding AVM tags to:', output_path)
+        avm.embed(output_path, output_path)
+    else:
+        print('Writing AVM-tagged image to:', output_path)
+        avm.embed(rgb_path, output_path)
 
-    print(f'try:   wwtdatatool preview {tile_dir}/index_rel.wtml')
+    # Tile it for WWT, if requested
+
+    if tile_path is not None:
+        from toasty.merge import averaging_merger, cascade_images
+        from toasty.pyramid import PyramidIO
+
+        print('Creating base layer of WWT tiling ...')
+
+        pio = PyramidIO(tile_path, default_format=img.default_format)
+        builder = Builder(pio)
+        builder.make_thumbnail_from_other(img)
+        builder.tile_base_as_study(img, cli_progress=True)
+        builder.apply_wcs_info(wcs, img.width, img.height)
+        builder.set_name(in_name_pieces[0])
+        builder.write_index_rel_wtml()
+
+        print('Cascading tiles ...')
+        cascade_images(
+            pio,
+            builder.imgset.tile_levels,
+            averaging_merger,
+            cli_progress=True
+        )
