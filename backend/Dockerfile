@@ -62,11 +62,10 @@ RUN wget https://github.com/dstndstn/astrometry.net/releases/download/${astromet
     && rm -f astrometry.net-${astrometry_net_version}.tar.gz \
     && mv astrometry.net-* astrometry \
     && cd astrometry \
-    && make \
-    && make py \
-    && make extra \
-    && make install INSTALL_DIR=/usr/local \
-    && make clean
+    && ARCH_FLAGS="-march=nocona -mtune=generic" make \
+    && ARCH_FLAGS="-march=nocona -mtune=generic" make py \
+    && ARCH_FLAGS="-march=nocona -mtune=generic" make extra \
+    && ARCH_FLAGS="-march=nocona -mtune=generic" make install INSTALL_DIR=/usr/local
 
 RUN ln -s /usr/bin/python3 /usr/bin/python
 ENV mv /usr/local/lib/python/astrometry /usr/local/lib/python3.8/site-packages/
