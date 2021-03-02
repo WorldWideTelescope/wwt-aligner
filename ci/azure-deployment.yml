@@ -1,49 +1,20 @@
-# Copyright 2020 the .NET Foundation
+# Copyright 2020-2021 the .NET Foundation
 # Licensed under the MIT License
 
-# Deployment workflows, run when all CI tests pass on the a push to the `rc`
-# branch.
+# Deployment workflows, run when all CI tests pass on the a push to either the
+# `rc` branch ("release" mode) or `master` ("mainDev" mode).
+
+parameters:
+  - name: isMainDev
+    type: boolean
+    default: false
+  - name: isRelease
+    type: boolean
+    default: false
 
 jobs:
 
-- job: branch_and_tag
-  pool:
-    vmImage: ubuntu-20.04
-  variables:
-  - group: Deployment Credentials
-  steps:
-  - template: azure-job-setup.yml
-    parameters:
-      setupGit: true
-  - bash: |
-      set -xeou pipefail
-      cranko release-workflow tag
-      git push --tags origin release:release
-    displayName: Tag and push
-    env:
-      GITHUB_TOKEN: $(GITHUB_TOKEN)
-
-- job: github_releases
-  dependsOn: branch_and_tag # otherwise, GitHub creates the tag itself
-  pool:
-    vmImage: ubuntu-20.04
-  variables:
-  - group: Deployment Credentials
-  steps:
-  - template: azure-job-setup.yml
-    parameters:
-      setupGit: true
-  - bash: |
-      set -xeou pipefail
-      cranko github create-releases
-
-      if cranko show if-released --exit-code wwt-aligner-frontend; then
-        cranko github upload-artifacts wwt-aligner-frontend \
-          $(Pipeline.Workspace)/binary-*/*
-      fi
-    displayName: Create GitHub releases
-    env:
-      GITHUB_TOKEN: $(GITHUB_TOKEN)
+# Jobs that run in either mode
 
 - job: docker_push
   pool:
@@ -54,19 +25,24 @@ jobs:
   - template: azure-job-setup.yml
 
   # Set the "deployment tag" for the Docker image. The variable
-  # $DOCKER_DEPLOYMENT_TAG is set to "skip", if we shouldn't release it, or the
-  # major version number, if we should. The Docker image versioning tracks the
-  # Python backend package.
+  # $DOCKER_DEPLOYMENT_TAG is set to "skip", if we shouldn't release it, or
+  # "stable", on a stable release, or "latest" in mainDev mode. "skip" happens
+  # during stable releases when we are *not* releasing the Python package.
   - bash: |
       set -euo pipefail
-      if cranko show if-released --exit-code wwt_aligner ; then
-        tag="$(cranko show version wwt_aligner |cut -d. -f1)"
+      if [[ ${isMainDev} == True ]] ; then
+        tag=latest
+      elif cranko show if-released --exit-code wwt_aligner ; then
+        tag=stable
       else
         tag=skip
       fi
-      echo "Docker deployment tag: $tag"
+      echo "Docker deployment tag: $isMainDev, $isRelease => $tag"
       echo "##vso[task.setvariable variable=DOCKER_DEPLOYMENT_TAG;]$tag"
     displayName: Determine deployment tag
+    env:
+      isMainDev: ${{ parameters.isMainDev }}
+      isRelease: ${{ parameters.isRelease }}
 
   - bash: |
       set -xeuo pipefail
@@ -84,4 +60,45 @@ jobs:
       command: 'push'
       tags: |
         $(DOCKER_DEPLOYMENT_TAG)
-        latest
+
+# Jobs that only run for releases
+
+- ${{ if parameters.isRelease }}:
+  - job: branch_and_tag
+    pool:
+      vmImage: ubuntu-20.04
+    variables:
+    - group: Deployment Credentials
+    steps:
+    - template: azure-job-setup.yml
+      parameters:
+        setupGit: true
+    - bash: |
+        set -xeou pipefail
+        cranko release-workflow tag
+        git push --tags origin release:release
+      displayName: Tag and push
+      env:
+        GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+  - job: github_releases
+    dependsOn: branch_and_tag # otherwise, GitHub creates the tag itself
+    pool:
+      vmImage: ubuntu-20.04
+    variables:
+    - group: Deployment Credentials
+    steps:
+    - template: azure-job-setup.yml
+      parameters:
+        setupGit: true
+    - bash: |
+        set -xeou pipefail
+        cranko github create-releases
+
+        if cranko show if-released --exit-code wwt-aligner-frontend; then
+          cranko github upload-artifacts wwt-aligner-frontend \
+            $(Pipeline.Workspace)/binary-*/*
+        fi
+      displayName: Create GitHub releases
+      env:
+        GITHUB_TOKEN: $(GITHUB_TOKEN)
