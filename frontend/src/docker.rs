@@ -175,9 +175,7 @@ impl DockerBuilder {
                         path_pieces.next();
                         ["cannot process empty input path `{}`", &piece.text]
                     );
-                    println!("BASENAME: {:?}", basename);
                     let dirname = path_pieces.next().unwrap_or(".");
-                    println!("DIRNAME: {:?}", dirname);
 
                     let mut canon = atry!(
                         std::fs::canonicalize(&dirname);
@@ -306,7 +304,6 @@ impl DockerBuilder {
             cmd.arg(arg);
         }
 
-        println!("QQQ {:?}", cmd);
         cmd
     }
 }
