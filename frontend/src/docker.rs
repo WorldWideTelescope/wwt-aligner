@@ -358,6 +358,14 @@ pub fn update_commands(tag: &str) -> Vec<Command> {
         ));
     cmds.push(cmd);
 
+    // Show the image info for convenience
+    let mut cmd = Command::new(DOCKER_COMMAND);
+    cmd.arg("image").arg("ls").arg(format!(
+        "{}:{}",
+        DEFAULT_IMAGE_BASENAME, DEFAULT_IMAGE_RUN_TAG
+    ));
+    cmds.push(cmd);
+
     cmds
 }
 

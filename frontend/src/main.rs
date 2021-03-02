@@ -122,9 +122,10 @@ impl Command for UpdateCommand {
                     return Ok(1);
                 }
             };
+
+            println!();
         }
 
-        println!();
         println!("Done!");
         Ok(0)
     }
