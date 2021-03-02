@@ -16,7 +16,8 @@ use std::{
 use crate::{a_ok_or, atry, errors::Result};
 
 const DOCKER_COMMAND: &str = "docker";
-const DEFAULT_IMAGE_NAME: &str = "aasworldwidetelescope/aligner:latest";
+const DEFAULT_IMAGE_BASENAME: &str = "aasworldwidetelescope/aligner";
+const DEFAULT_IMAGE_RUN_TAG: &str = "active";
 const DEFAULT_INNER_COMMAND: &str = "wwt-aligner-agent";
 const SUPPORTED_ARGS_PROTOCOL_VERSION: usize = 1;
 
@@ -46,7 +47,7 @@ struct DockerPort {
 impl Default for DockerBuilder {
     fn default() -> Self {
         DockerBuilder {
-            image_name: DEFAULT_IMAGE_NAME.to_owned(),
+            image_name: format!("{}:{}", DEFAULT_IMAGE_BASENAME, DEFAULT_IMAGE_RUN_TAG),
             volumes: Default::default(),
             ports: Default::default(),
             inner_args: Default::default(),
@@ -70,7 +71,10 @@ impl DockerBuilder {
         analyze_cmd
             .arg("run")
             .arg("--rm")
-            .arg(DEFAULT_IMAGE_NAME)
+            .arg(format!(
+                "{}:{}",
+                DEFAULT_IMAGE_BASENAME, DEFAULT_IMAGE_RUN_TAG
+            ))
             .arg(DEFAULT_INNER_COMMAND)
             .arg("--x-analyze-args-mode")
             .args(args);
@@ -334,11 +338,27 @@ impl DockerBuilder {
     }
 }
 
-/// Generate a Command that will update the Docker image.
-pub fn update_command() -> Command {
+/// Generate Commands that will update the Docker image.
+///
+/// Returning a vec here is pretty goofy, but whatever.
+pub fn update_commands(tag: &str) -> Vec<Command> {
+    let mut cmds = Vec::new();
+
     let mut cmd = Command::new(DOCKER_COMMAND);
-    cmd.arg("pull").arg(DEFAULT_IMAGE_NAME);
-    cmd
+    cmd.arg("pull")
+        .arg(format!("{}:{}", DEFAULT_IMAGE_BASENAME, tag));
+    cmds.push(cmd);
+
+    let mut cmd = Command::new(DOCKER_COMMAND);
+    cmd.arg("tag")
+        .arg(format!("{}:{}", DEFAULT_IMAGE_BASENAME, tag))
+        .arg(format!(
+            "{}:{}",
+            DEFAULT_IMAGE_BASENAME, DEFAULT_IMAGE_RUN_TAG
+        ));
+    cmds.push(cmd);
+
+    cmds
 }
 
 /// The main "args protocol" data payload.
