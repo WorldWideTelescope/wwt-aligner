@@ -104,6 +104,7 @@ RUN apt -y update \
         python3-setuptools \
         python3-tk \
         python3-wheel \
+        sudo \
         wcslib-tools \
         wget \
         zlib1g \
@@ -112,4 +113,8 @@ RUN apt -y update \
 
 COPY --from=build /usr/local /usr/local
 RUN ln -s /usr/bin/python3 /usr/bin/python
+
+ENTRYPOINT ["/entrypoint.sh"]
+COPY entrypoint.sh /
+
 CMD ["wwt-aligner-agent"]
