@@ -175,14 +175,15 @@ def go_getparser(parser):
         help = 'The path to output the image in AAS WorldWide Telescope tiled format',
     )
     parser.add_argument(
-        'fits_path',
-        metavar = 'FITS-PATH',
-        help = 'The path to input FITS file',
-    )
-    parser.add_argument(
         'rgb_path',
         metavar = 'RGB-PATH',
         help = 'The path to input file to solve',
+    )
+    parser.add_argument(
+        'fits_paths',
+        metavar = 'FITS-PATH',
+        nargs = '+',
+        help = 'The path to input FITS file',
     )
 
 
@@ -197,8 +198,10 @@ def go_analyze_args(builder, settings):
         builder.add_arg('--tile=', incomplete=True)
         builder.add_path_arg(settings.tile_path, created=True)
 
-    builder.add_path_arg(settings.fits_path, pre_exists=True)
     builder.add_path_arg(settings.rgb_path, pre_exists=True)
+
+    for p in settings.fits_paths:
+        builder.add_path_arg(p, pre_exists=True)
 
 
 def go_impl(settings):
@@ -206,8 +209,8 @@ def go_impl(settings):
 
     work_dir = tempfile.mkdtemp()
     go(
-        fits_path = settings.fits_path,
         rgb_path = settings.rgb_path,
+        fits_paths = settings.fits_paths,
         output_path = settings.output_path,
         tile_path = settings.tile_path,
         work_dir = work_dir,

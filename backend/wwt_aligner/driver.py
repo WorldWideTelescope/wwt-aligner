@@ -34,7 +34,7 @@ def image_size_to_anet_preset(size_deg):
 
 
 def go(
-    fits_path = None,
+    fits_paths = None,
     rgb_path = None,
     output_path = None,
     tile_path = None,
@@ -44,73 +44,79 @@ def go(
     """
     Do the whole thing.
     """
+    index_fits_list = []
 
-    # Check our FITS image and get some basic quantities. We need
-    # to read in the data to sourcefind with SEP.
+    for fits_num, fits_path in enumerate(fits_paths):
+        print('Processing reference science image', fits_path, '...')
 
-    with fits.open(fits_path) as hdul:
-        hdu = hdul[0]
-        wcs = WCS(hdu)
-        data = hdu.data
-        height, width = data.shape[-2:]
+        # Check our FITS image and get some basic quantities. We need
+        # to read in the data to sourcefind with SEP.
 
-    data = data.byteswap(inplace=True).newbyteorder()
+        with fits.open(fits_path) as hdul:
+            hdu = hdul[0]
+            wcs = WCS(hdu)
+            data = hdu.data
+            height, width = data.shape[-2:]
 
-    midx = width // 2
-    midy = height // 2
-    coords = wcs.pixel_to_world(
-        [midx, midx + 1, 0, width, 0, width],
-        [midy, midy + 1, 0, height, midy, midy],
-    )
+        data = data.byteswap(inplace=True).newbyteorder()
 
-    small_scale = coords[0].separation(coords[1])
-    #print('small scale:', small_scale)
-    large_scale = coords[2].separation(coords[3])
-    #print('large scale:', large_scale)
-    width = coords[4].separation(coords[5])
-
-    # Use SEP to find sources
-
-    print('Finding sources in', fits_path, '...')
-
-    bkg = sep.Background(data)
-    #print('SEP background level:', bkg.globalback)
-    #print('SEP background rms:', bkg.globalrms)
-
-    bkg.subfrom(data)
-    objects = sep.extract(data, 3, err=bkg.globalrms)
-    #print('SEP object count:', len(objects))
-
-    coords = wcs.pixel_to_world(objects['x'], objects['y'])
-    tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
-
-    objects_fits = os.path.join(work_dir, 'objects.fits')
-    tbl.write(objects_fits, format='fits', overwrite=True)
-
-    # Generate the Astrometry.Net index
-
-    index_fits = os.path.join(work_dir, 'index.fits')
-
-    argv = [
-        anet_bin_prefix + 'build-astrometry-index',
-        '-i', objects_fits,
-        '-o', index_fits,
-        '-E',  # objects table is much less than all-sky
-        '-f',  # our sort column is flux-like, not mag-like
-        '-S', 'FLUX',
-        '-P', str(image_size_to_anet_preset(large_scale.deg))
-    ]
-
-    index_log = os.path.join(work_dir, 'build-index.log')
-    print('Generating Astrometry.Net index ...')
-
-    with open(index_log, 'wb') as log:
-        subprocess.check_call(
-            argv,
-            stdout = log,
-            stderr = subprocess.STDOUT,
-            shell = False,
+        midx = width // 2
+        midy = height // 2
+        coords = wcs.pixel_to_world(
+            [midx, midx + 1, 0, width, 0, width],
+            [midy, midy + 1, 0, height, midy, midy],
         )
+
+        small_scale = coords[0].separation(coords[1])
+        #print('small scale:', small_scale)
+        large_scale = coords[2].separation(coords[3])
+        #print('large scale:', large_scale)
+        width = coords[4].separation(coords[5])
+
+        # Use SEP to find sources
+
+        print('   Finding sources ...')
+
+        bkg = sep.Background(data)
+        #print('SEP background level:', bkg.globalback)
+        #print('SEP background rms:', bkg.globalrms)
+
+        bkg.subfrom(data)
+        objects = sep.extract(data, 3, err=bkg.globalrms)
+        #print('SEP object count:', len(objects))
+
+        coords = wcs.pixel_to_world(objects['x'], objects['y'])
+        tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
+
+        objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
+        tbl.write(objects_fits, format='fits', overwrite=True)
+
+        # Generate the Astrometry.Net index
+
+        index_fits = os.path.join(work_dir, f'index{fits_num}.fits')
+
+        argv = [
+            anet_bin_prefix + 'build-astrometry-index',
+            '-i', objects_fits,
+            '-o', index_fits,
+            '-E',  # objects table is much less than all-sky
+            '-f',  # our sort column is flux-like, not mag-like
+            '-S', 'FLUX',
+            '-P', str(image_size_to_anet_preset(large_scale.deg))
+        ]
+
+        index_log = os.path.join(work_dir, f'build-index-{fits_num}.log')
+        print('   Generating Astrometry.Net index ...')
+
+        with open(index_log, 'wb') as log:
+            subprocess.check_call(
+                argv,
+                stdout = log,
+                stderr = subprocess.STDOUT,
+                shell = False,
+            )
+
+        index_fits_list.append(index_fits)
 
     # Write out config file
 
@@ -119,7 +125,9 @@ def go(
     with open(cfg_path, 'wt') as f:
         print('add_path', work_dir, file=f)
         print('inparallel', file=f)
-        print('index', index_fits, file=f)
+
+        for p in index_fits_list:
+            print('index', p, file=f)
 
     # Solve our input image
     #
@@ -146,7 +154,7 @@ def go(
     ]
 
     solve_log = os.path.join(work_dir, 'solve-field.log')
-    print('Launching Astrometry.Net solver ...')
+    print('Launching Astrometry.Net solver for', rgb_path, '...')
 
     with open(solve_log, 'wb') as log:
         subprocess.check_call(
