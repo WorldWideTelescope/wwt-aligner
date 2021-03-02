@@ -1,10 +1,13 @@
 # Copyright 2020 the .NET Foundation
 # Licensed under the MIT License.
 
-"""Entrypoint for the "wwt-aligner" command-line interface.
+"""
+Entrypoint for the "wwt-aligner[-agent]" command-line interface.
 
 """
 import argparse
+import json
+import os.path
 import shutil
 import sys
 import tempfile
@@ -20,6 +23,99 @@ def die(msg):
 
 def warn(msg):
     print('warning:', msg, file=sys.stderr)
+
+
+# The agent is generally expected to run inside a Docker container. In order to
+# be able to do its input and output, then, its container needs to be set up
+# with the appropriate filesystem mounts by the program that launches it. So
+# there needs to be some kind of analysis of the program arguments and
+# identification of which directories need to be mounted on the launcher side.
+#
+# But as long as we're running the agent inside Docker, it is/would be *really*
+# nice to be able to get new CLI commands just by updating the container. We
+# could ask people to update the launcher but would prefer if it didn't have to
+# stay in close sync with the containerized app. You could imagine a self-update
+# scheme where we update the launcher with a binary stored inside the container,
+# but that's a bit tricky to implement.
+#
+# Instead, we the launcher run each command twice, the first time passing in a
+# special hidden `--x-analyze-args-mode` flag. When this flag is active, the agent
+# returns JSON specifying what kind of environment setup the launcher needs to
+# perform. The agent then runs the command "for real" as instructed. This way
+# the launcher can start handling new commands without needing to explicitly
+# know about them. This handshake is the "args protocol".
+
+ARGS_PROTOCOL_VERSION = 1
+
+class ArgPiece(object):
+    text = None
+    "The text of this argument piece."
+
+    incomplete = False
+    """If true, the subsequent arg piece should be concatenated to this one
+    without a space. This allows us to handle arguments of the form
+    `--path=./somepath.txt`."""
+
+    path_pre_exists = False
+    """If true, this piece is a filesystem path and it should exist before the
+    program starts running."""
+
+    path_created = False
+    """If true, this piece is a filesystem path that the program will create
+    during its exection. Therefore its containing directory should be mounted
+    read-write in the Docker container."""
+
+    def __init__(self, text, incomplete=False, path_pre_exists=False, path_created=False):
+        self.text = str(text)
+        self.incomplete = incomplete
+        self.path_pre_exists = path_pre_exists
+        self.path_created = path_created
+
+    def as_json(self):
+        data = {'text': self.text}
+
+        if self.incomplete:
+            data['incomplete'] = True
+
+        if self.path_pre_exists:
+            data['path_pre_exists'] = True
+
+        if self.path_created:
+            data['path_created'] = True
+
+        return data
+
+
+class ArgsProtocolBuilder(object):
+    pieces = None
+
+    def __init__(self):
+        self.pieces = []
+
+    def add_arg(self, arg, incomplete=False):
+        """
+        Add an argument that needs no translation from the host to the container.
+        """
+        self.pieces.append(ArgPiece(arg, incomplete=incomplete))
+
+    def add_path_arg(self, path, incomplete=False, pre_exists=False, created=False):
+        """
+        Add an argument that is a path on the host.
+        """
+        assert pre_exists or created
+        self.pieces.append(ArgPiece(
+            path,
+            incomplete = incomplete,
+            path_pre_exists = pre_exists,
+            path_created = created,
+        ))
+
+    def write_as_json(self, fp):
+        data = {
+            'version': ARGS_PROTOCOL_VERSION,
+            'pieces': [p.as_json() for p in self.pieces],
+        }
+        json.dump(data, fp, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 # "go" subcommand
@@ -40,6 +136,14 @@ def go_getparser(parser):
         metavar = 'RGB-PATH',
         help = 'The path to input file to solve',
     )
+
+
+def go_analyze_args(builder, settings):
+    if settings.anet_bin_prefix:
+        builder.add_arg(f'--anet-bin-prefix={settings.anet_bin_prefix}')
+
+    builder.add_path_arg(settings.fits_path, pre_exists=True)
+    builder.add_path_arg(settings.rgb_path, pre_exists=True)
 
 
 def go_impl(settings):
@@ -71,6 +175,24 @@ def entrypoint(args=None):
     # Set up the subcommands from globals()
 
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--x-analyze-args-mode',
+        dest = 'analyze_args_mode',
+        action = 'store_true',
+        help = argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--x-host-path',
+        dest = 'host_paths',
+        action = 'append',
+        help = argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--x-container-path',
+        dest = 'container_paths',
+        action = 'append',
+        help = argparse.SUPPRESS,
+    )
     subparsers = parser.add_subparsers(dest="subcommand")
     commands = set()
 
@@ -94,10 +216,21 @@ def entrypoint(args=None):
 
     py_name = settings.subcommand.replace('-', '_')
 
-    impl = globals().get(py_name + '_impl')
-    if impl is None:
-        die('no such subcommand "{}"'.format(settings.subcommand))
+    if not settings.analyze_args_mode:
+        # Just Do It.
+        impl = globals().get(py_name + '_impl')
+        if impl is None:
+            die('no such subcommand "{}"'.format(settings.subcommand))
 
-    # OK to go!
+        impl(settings)
+    else:
+        # We're in args-analysis mode.
+        aa = globals().get(py_name + '_analyze_args')
+        if aa is None:
+            die('no such (analyzable) subcommand "{}"'.format(settings.subcommand))
 
-    impl(settings)
+        builder = ArgsProtocolBuilder()
+        builder.add_arg(settings.subcommand)
+        aa(builder, settings)
+        builder.write_as_json(sys.stdout)
+        print()
