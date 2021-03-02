@@ -1,3 +1,9 @@
+# wwt-aligner-frontend 0.3.0 (2021-03-02)
+
+- Lots of work towards trying to reach basic functionality.
+- Making a release now to test out the GitHub pages deployment automation.
+
+
 # wwt-aligner-frontend 0.2.1 (2021-01-15)
 
 No code changes. Iterating on the deployment pipeline.
