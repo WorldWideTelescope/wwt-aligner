@@ -189,7 +189,7 @@ def go(
 
     if input_ext != output_ext:
         print('Converting input image to create:', output_path)
-        img.save(output_path)
+        img.save(output_path, format=output_ext.replace('.', ''))
 
         print('Adding AVM tags to:', output_path)
         avm.embed(output_path, output_path)
