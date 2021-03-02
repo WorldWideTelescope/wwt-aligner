@@ -298,6 +298,12 @@ impl DockerBuilder {
             ));
         }
 
+        let uid = nix::unistd::geteuid();
+        cmd.arg("-e").arg(format!("HOST_UID={}", uid));
+
+        let gid = nix::unistd::getegid();
+        cmd.arg("-e").arg(format!("HOST_GID={}", gid));
+
         cmd.arg(self.image_name);
 
         for arg in self.inner_args.drain(..) {
