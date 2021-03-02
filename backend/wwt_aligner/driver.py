@@ -1,4 +1,4 @@
-# Copyright 2020 the .NET Foundation
+# Copyright 2020-2021 the .NET Foundation
 # Licensed under the MIT License
 
 """
@@ -18,8 +18,6 @@ import sep
 import subprocess
 from toasty.builder import Builder
 from toasty.image import ImageLoader
-from toasty.merge import averaging_merger, cascade_images
-from toasty.pyramid import PyramidIO
 
 
 def image_size_to_anet_preset(size_deg):
@@ -39,6 +37,7 @@ def go(
     fits_path = None,
     rgb_path = None,
     output_path = None,
+    tile_path = None,
     work_dir = '',
     anet_bin_prefix = '',
 ):
@@ -180,18 +179,17 @@ def go(
     # conversion manually. We're not in a great position to be clever so we
     # assess "format" from filename extensions.
 
+    in_name_pieces = os.path.splitext(os.path.basename(rgb_path))
+
     if output_path is None:
-        in_name_pieces = os.path.splitext(os.path.basename(rgb_path))
         output_path = in_name_pieces[0] + '_tagged' + in_name_pieces[1]
 
-    input_ext = os.path.splitext(rgb_path)[1].lower()
+    input_ext = in_name_pieces[1].lower()
     output_ext = os.path.splitext(output_path)[1].lower()
 
     if input_ext != output_ext:
         print('Converting input image to create:', output_path)
-
-        with pil_image.open(rgb_path) as img:
-            img.save(output_path)
+        img.save(output_path)
 
         print('Adding AVM tags to:', output_path)
         avm.embed(output_path, output_path)
@@ -199,25 +197,26 @@ def go(
         print('Writing AVM-tagged image to:', output_path)
         avm.embed(rgb_path, output_path)
 
-    ## # Basic toasty tiling
-    ##
-    ## print('basic tiling ...')
-    ## tile_dir = in_name_pieces[0] + '_tiled'
-    ##
-    ## pio = PyramidIO(tile_dir, default_format=img.default_format)
-    ## builder = Builder(pio)
-    ## builder.make_thumbnail_from_other(img)
-    ## builder.tile_base_as_study(img, cli_progress=True)
-    ## builder.apply_wcs_info(wcs, img.width, img.height)
-    ## builder.set_name(in_name_pieces[0])
-    ## builder.write_index_rel_wtml()
-    ##
-    ## print('cascading ...')
-    ## cascade_images(
-    ##     pio,
-    ##     builder.imgset.tile_levels,
-    ##     averaging_merger,
-    ##     cli_progress=True
-    ## )
-    ##
-    ## print(f'try:   wwtdatatool preview {tile_dir}/index_rel.wtml')
+    # Tile it for WWT, if requested
+
+    if tile_path is not None:
+        from toasty.merge import averaging_merger, cascade_images
+        from toasty.pyramid import PyramidIO
+
+        print('Creating base layer of WWT tiling ...')
+
+        pio = PyramidIO(tile_path, default_format=img.default_format)
+        builder = Builder(pio)
+        builder.make_thumbnail_from_other(img)
+        builder.tile_base_as_study(img, cli_progress=True)
+        builder.apply_wcs_info(wcs, img.width, img.height)
+        builder.set_name(in_name_pieces[0])
+        builder.write_index_rel_wtml()
+
+        print('Cascading tiles ...')
+        cascade_images(
+            pio,
+            builder.imgset.tile_levels,
+            averaging_merger,
+            cli_progress=True
+        )

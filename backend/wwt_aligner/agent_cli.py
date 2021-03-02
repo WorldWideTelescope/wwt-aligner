@@ -170,6 +170,11 @@ def go_getparser(parser):
         help = 'The path of the new AVM-tagged image to output',
     )
     parser.add_argument(
+        '--tile', '-t',
+        dest = 'tile_path',
+        help = 'The path to output the image in AAS WorldWide Telescope tiled format',
+    )
+    parser.add_argument(
         'fits_path',
         metavar = 'FITS-PATH',
         help = 'The path to input FITS file',
@@ -188,6 +193,10 @@ def go_analyze_args(builder, settings):
     builder.add_arg('--output=', incomplete=True)
     builder.add_path_arg(settings.output_path, created=True)
 
+    if settings.tile_path:
+        builder.add_arg('--tile=', incomplete=True)
+        builder.add_path_arg(settings.tile_path, created=True)
+
     builder.add_path_arg(settings.fits_path, pre_exists=True)
     builder.add_path_arg(settings.rgb_path, pre_exists=True)
 
@@ -200,6 +209,7 @@ def go_impl(settings):
         fits_path = settings.fits_path,
         rgb_path = settings.rgb_path,
         output_path = settings.output_path,
+        tile_path = settings.tile_path,
         work_dir = work_dir,
         anet_bin_prefix = settings.anet_bin_prefix,
     )
