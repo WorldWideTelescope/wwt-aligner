@@ -11,7 +11,7 @@ with io.open('README.md', encoding='utf-8') as f:
 
 setup_args = dict(
     name = 'wwt_aligner',  # cranko project-name
-    version = '0.3.1',  # cranko project-version
+    version = '0.4.0',  # cranko project-version
     description = 'Align RGB images to FITS images using Astrometry.net',
     long_description = LONG_DESCRIPTION,
     long_description_content_type = 'text/markdown',

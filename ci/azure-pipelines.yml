@@ -1,4 +1,4 @@
-# Copyright 2020 the .NET Foundation
+# Copyright 2020-2021 the .NET Foundation
 # Licensed under the MIT License
 
 trigger:
@@ -16,8 +16,10 @@ stages:
   jobs:
   - template: azure-build.yml
 
-# Only deploy on pushes to `rc`.
 - stage: Deploy
-  condition: and(succeeded('MainBuild'), ne(variables['build.reason'], 'PullRequest'), eq(variables['Build.SourceBranchName'], 'rc'))
+  condition: and(succeeded('MainBuild'), ne(variables['build.reason'], 'PullRequest'))
   jobs:
   - template: azure-deployment.yml
+    parameters:
+      isMainDev: ${{ ne(variables['Build.SourceBranchName'], 'rc') }}
+      isRelease: ${{ eq(variables['Build.SourceBranchName'], 'rc') }}
