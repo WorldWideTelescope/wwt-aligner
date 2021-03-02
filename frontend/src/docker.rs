@@ -25,6 +25,7 @@ const SUPPORTED_ARGS_PROTOCOL_VERSION: usize = 1;
 pub struct DockerBuilder {
     image_name: String,
     volumes: Vec<DockerVolume>,
+    ports: Vec<DockerPort>,
     inner_args: Vec<OsString>,
 }
 
@@ -35,11 +36,19 @@ struct DockerVolume {
     read_write: bool,
 }
 
+#[derive(Debug)]
+struct DockerPort {
+    host_ip: String,
+    host_port: u16,
+    container_port: u16,
+}
+
 impl Default for DockerBuilder {
     fn default() -> Self {
         DockerBuilder {
             image_name: DEFAULT_IMAGE_NAME.to_owned(),
             volumes: Default::default(),
+            ports: Default::default(),
             inner_args: Default::default(),
         }
     }
@@ -254,10 +263,14 @@ impl DockerBuilder {
             builder.arg(arg);
         }
 
-        // Deal with the volumes and we're done.
+        // Deal with the easier stuff and we're done.
 
         for (_, vi) in volumes.drain() {
             builder.volumes.push(vi);
+        }
+
+        for port in apdata.published_ports.drain(..) {
+            builder.ports.push(port.into());
         }
 
         Ok(Some(builder))
@@ -277,6 +290,14 @@ impl DockerBuilder {
             vstr.push(":");
             vstr.push(if vol.read_write { "rw" } else { "ro" });
             cmd.arg(vstr);
+        }
+
+        for port in self.ports.drain(..) {
+            cmd.arg("-p");
+            cmd.arg(format!(
+                "{}:{}:{}",
+                port.host_ip, port.host_port, port.container_port
+            ));
         }
 
         cmd.arg(self.image_name);
@@ -302,9 +323,17 @@ pub fn update_command() -> Command {
 struct ArgsProtocolData {
     version: usize,
     pieces: Vec<ArgsProtocolPieceInfo>,
+
+    #[serde(default)]
+    published_ports: Vec<ArgsProtocolPortInfo>,
 }
 
-/// Information about a volume to be mounted in the Docker container.
+/// Information about a portion of a command-line argument.
+///
+/// Arguments are broken into pieces so that portions corresponding to
+/// filesystem paths can be identified. The frontend needs to understand how
+/// paths are used by the backend so that it can set up the appropriate mounts
+/// inside the Docker environment.
 #[derive(Debug, Deserialize)]
 struct ArgsProtocolPieceInfo {
     /// The argument text.
@@ -326,4 +355,28 @@ struct ArgsProtocolPieceInfo {
     /// path should be mounted read-write inside the container.
     #[serde(default)]
     path_created: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArgsProtocolPortInfo {
+    #[serde(default = "default_port_ip")]
+    host_ip: String,
+
+    host_port: u16,
+
+    container_port: u16,
+}
+
+fn default_port_ip() -> String {
+    "127.0.0.1".to_owned()
+}
+
+impl From<ArgsProtocolPortInfo> for DockerPort {
+    fn from(ap: ArgsProtocolPortInfo) -> DockerPort {
+        DockerPort {
+            host_ip: ap.host_ip,
+            host_port: ap.host_port,
+            container_port: ap.container_port,
+        }
+    }
 }

@@ -86,17 +86,48 @@ class ArgPiece(object):
         return data
 
 
+class PublishedPort(object):
+    host_ip = None
+    """The IP address specification for the interface on the host that should listen
+    for connections. If unspecified, defaults to the local loopback interface."""
+
+    host_port = None
+    "The port number on the host side."
+
+    container_port = None
+    "The port number on the container side."
+
+    def __init__(self, host_port, container_port, host_ip=None):
+        self.host_ip = host_ip
+        self.host_port = host_port
+        self.container_port = container_port
+
+    def as_json(self):
+        data = {
+            'host_port': self.host_port,
+            'container_port': self.container_port,
+        }
+
+        if self.host_ip is not None:
+            data['host_ip'] = self.host_ip
+
+        return data
+
+
 class ArgsProtocolBuilder(object):
     pieces = None
+    ports = None
 
     def __init__(self):
         self.pieces = []
+        self.ports = []
 
     def add_arg(self, arg, incomplete=False):
         """
         Add an argument that needs no translation from the host to the container.
         """
         self.pieces.append(ArgPiece(arg, incomplete=incomplete))
+        return self
 
     def add_path_arg(self, path, incomplete=False, pre_exists=False, created=False):
         """
@@ -109,11 +140,17 @@ class ArgsProtocolBuilder(object):
             path_pre_exists = pre_exists,
             path_created = created,
         ))
+        return self
+
+    def add_published_port(self, host_port, container_port, host_ip=None):
+        self.ports.append(PublishedPort(host_port, container_port, host_ip=host_ip))
+        return self
 
     def write_as_json(self, fp):
         data = {
             'version': ARGS_PROTOCOL_VERSION,
             'pieces': [p.as_json() for p in self.pieces],
+            'published_ports': [p.as_json() for p in self.ports],
         }
         json.dump(data, fp, ensure_ascii=False, indent=2, sort_keys=True)
 
