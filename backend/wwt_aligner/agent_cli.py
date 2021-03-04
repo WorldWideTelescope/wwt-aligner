@@ -231,6 +231,41 @@ def go_impl(settings):
 
     return 0
 
+
+# "serve-wtml" subcommand
+
+def serve_wtml_getparser(parser):
+    parser.add_argument(
+        '--port',
+        metavar = 'NUMBER',
+        type = int,
+        default = 17001,
+        help = 'The port number on which to run the HTTP service',
+    )
+    parser.add_argument(
+        'wtml_path',
+        metavar = 'WTML-PATH',
+        help = 'The path to the WTML file to serve',
+    )
+
+
+def serve_wtml_analyze_args(builder, settings):
+    builder.add_arg('--port=', incomplete=True)
+    builder.add_arg(settings.port)
+    builder.add_published_port(settings.port, 8080)
+
+    builder.add_path_arg(settings.wtml_path, pre_exists=True)
+
+
+def serve_wtml_impl(settings):
+    from wwt_data_formats.server import run_server
+
+    serve_settings = argparse.Namespace()
+    serve_settings.port = 8080
+    serve_settings.root_dir = os.path.dirname(settings.wtml_path) or '.'
+    run_server(serve_settings)
+
+
 # The CLI driver:
 
 def entrypoint(args=None):
