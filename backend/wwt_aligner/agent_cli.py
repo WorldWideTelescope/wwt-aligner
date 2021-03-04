@@ -208,16 +208,28 @@ def go_impl(settings):
     from .driver import go
 
     work_dir = tempfile.mkdtemp()
-    go(
-        rgb_path = settings.rgb_path,
-        fits_paths = settings.fits_paths,
-        output_path = settings.output_path,
-        tile_path = settings.tile_path,
-        work_dir = work_dir,
-        anet_bin_prefix = settings.anet_bin_prefix,
-    )
-    shutil.rmtree(work_dir)
 
+    try:
+        go(
+            rgb_path = settings.rgb_path,
+            fits_paths = settings.fits_paths,
+            output_path = settings.output_path,
+            tile_path = settings.tile_path,
+            work_dir = work_dir,
+            anet_bin_prefix = settings.anet_bin_prefix,
+        )
+    except KeyboardInterrupt:
+        print('\nfatal error: the alignment process was interrupted', file=sys.stderr)
+        # This is actually less than ideal behavior; see
+        # https://newton.cx/~peter/howto/correctly-cancel-python-shell/
+        return 1
+    except Exception as e:
+        print('fatal error: the alignment process failed', file=sys.stderr)
+        return 1
+    finally:
+        shutil.rmtree(work_dir)
+
+    return 0
 
 # The CLI driver:
 
@@ -284,7 +296,8 @@ def entrypoint(args=None):
         if impl is None:
             die('no such subcommand "{}"'.format(settings.subcommand))
 
-        impl(settings)
+        rv = impl(settings) or 0
+        sys.exit(rv)
     else:
         # We're in args-analysis mode.
         aa = globals().get(py_name + '_analyze_args')

@@ -16,6 +16,7 @@ from PIL import Image as pil_image
 from pyavm import AVM
 import sep
 import subprocess
+import sys
 from toasty.builder import Builder
 from toasty.image import ImageLoader
 
@@ -52,44 +53,68 @@ def go(
         # Check our FITS image and get some basic quantities. We need
         # to read in the data to sourcefind with SEP.
 
-        with fits.open(fits_path) as hdul:
-            hdu = hdul[0]
-            wcs = WCS(hdu)
-            data = hdu.data
-            height, width = data.shape[-2:]
+        try:
+            data = None
 
-        data = data.byteswap(inplace=True).newbyteorder()
+            with fits.open(fits_path) as hdul:
+                for hdu in hdul:
+                    if hdu.data is None:
+                        continue  # reject: no data
 
-        midx = width // 2
-        midy = height // 2
-        coords = wcs.pixel_to_world(
-            [midx, midx + 1, 0, width, 0, width],
-            [midy, midy + 1, 0, height, midy, midy],
-        )
+                    if hasattr(hdu, 'columns'):
+                        continue  # reject: tabular
 
-        small_scale = coords[0].separation(coords[1])
-        #print('small scale:', small_scale)
-        large_scale = coords[2].separation(coords[3])
-        #print('large scale:', large_scale)
-        width = coords[4].separation(coords[5])
+                    if len(hdu.shape) < 2:
+                        continue  # reject: not at least 2D
+
+                    # OK, it looks like this the HDU we want!
+                    wcs = WCS(hdu)
+                    data = hdu.data
+                    height, width = data.shape[-2:]
+                    break
+
+            assert data is not None, 'failed to find a usable image HDU'
+            data = data.byteswap(inplace=True).newbyteorder()
+
+            midx = width // 2
+            midy = height // 2
+            coords = wcs.pixel_to_world(
+                [midx, midx + 1, 0, width, 0, width],
+                [midy, midy + 1, 0, height, midy, midy],
+            )
+
+            small_scale = coords[0].separation(coords[1])
+            #print('small scale:', small_scale)
+            large_scale = coords[2].separation(coords[3])
+            #print('large scale:', large_scale)
+            width = coords[4].separation(coords[5])
+        except Exception as e:
+            print('  Failed to read image data from this file', file=sys.stderr)
+            print('  Caused by:', e, file=sys.stderr)
+            continue
 
         # Use SEP to find sources
 
-        print('   Finding sources ...')
+        print('  Finding sources ...')
 
-        bkg = sep.Background(data)
-        #print('SEP background level:', bkg.globalback)
-        #print('SEP background rms:', bkg.globalrms)
+        try:
+            bkg = sep.Background(data)
+            #print('SEP background level:', bkg.globalback)
+            #print('SEP background rms:', bkg.globalrms)
 
-        bkg.subfrom(data)
-        objects = sep.extract(data, 3, err=bkg.globalrms)
-        #print('SEP object count:', len(objects))
+            bkg.subfrom(data)
+            objects = sep.extract(data, 3, err=bkg.globalrms)
+            #print('SEP object count:', len(objects))
 
-        coords = wcs.pixel_to_world(objects['x'], objects['y'])
-        tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
+            coords = wcs.pixel_to_world(objects['x'], objects['y'])
+            tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
 
-        objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
-        tbl.write(objects_fits, format='fits', overwrite=True)
+            objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
+            tbl.write(objects_fits, format='fits', overwrite=True)
+        except Exception as e:
+            print('  Failed to find sources in this file', file=sys.stderr)
+            print('  Caused by:', e, file=sys.stderr)
+            continue
 
         # Generate the Astrometry.Net index
 
@@ -106,17 +131,26 @@ def go(
         ]
 
         index_log = os.path.join(work_dir, f'build-index-{fits_num}.log')
-        print('   Generating Astrometry.Net index ...')
+        print('  Generating Astrometry.Net index ...')
 
-        with open(index_log, 'wb') as log:
-            subprocess.check_call(
-                argv,
-                stdout = log,
-                stderr = subprocess.STDOUT,
-                shell = False,
-            )
+        try:
+            with open(index_log, 'wb') as log:
+                subprocess.check_call(
+                    argv,
+                    stdout = log,
+                    stderr = subprocess.STDOUT,
+                    shell = False,
+                )
+        except Exception as e:
+            print('  Failed to index this file', file=sys.stderr)
+            print('  Caused by:', e, file=sys.stderr)
+            continue
 
+        # Success!
         index_fits_list.append(index_fits)
+
+    if not index_fits_list:
+        raise Exception('cannot align: failed to index any of the input FITS files')
 
     # Write out config file
 
