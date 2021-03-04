@@ -178,7 +178,7 @@ def go(
     hdwork['PC1_2'] *= -1
     hdwork['PC2_2'] *= -1
     wcs = WCS(hdwork)
-    avm = AVM.from_wcs(wcs)
+    avm = AVM.from_wcs(wcs, shape=(img.height, img.width))
 
     # Apply AVM
     #
