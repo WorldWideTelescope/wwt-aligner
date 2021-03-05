@@ -61,6 +61,9 @@ The `--anet-bin-prefix` option can be ignored in almost all use cases. If you
 are testing the agent outside of the Docker container, you can use it to tell
 the agent where to find the Astrometry.Net programs.
 
+The [generic command-line arguments](@/commands/_index.md#generic-command-line-arguments)
+are also supported.
+
 # Remarks
 
 ## FITS inputs

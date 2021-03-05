@@ -20,6 +20,8 @@ import sys
 from toasty.builder import Builder
 from toasty.image import ImageLoader
 
+from . import logger
+
 
 def image_size_to_anet_preset(size_deg):
     """
@@ -48,7 +50,7 @@ def go(
     index_fits_list = []
 
     for fits_num, fits_path in enumerate(fits_paths):
-        print('Processing reference science image', fits_path, '...')
+        logger.info('Processing reference science image `%s` ...', fits_path)
 
         # Check our FITS image and get some basic quantities. We need
         # to read in the data to sourcefind with SEP.
@@ -83,19 +85,17 @@ def go(
                 [midy, midy + 1, 0, height, midy, midy],
             )
 
-            small_scale = coords[0].separation(coords[1])
-            #print('small scale:', small_scale)
             large_scale = coords[2].separation(coords[3])
-            #print('large scale:', large_scale)
+            logger.debug('  large scale for this image: %e deg', large_scale.deg)
             width = coords[4].separation(coords[5])
         except Exception as e:
-            print('  Failed to read image data from this file', file=sys.stderr)
-            print('  Caused by:', e, file=sys.stderr)
+            logger.warning('  Failed to read image data from this file')
+            logger.warning('  Caused by: %s', e)
             continue
 
         # Use SEP to find sources
 
-        print('  Finding sources ...')
+        logger.info('  Finding sources ...')
 
         try:
             bkg = sep.Background(data)
@@ -112,8 +112,8 @@ def go(
             objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
             tbl.write(objects_fits, format='fits', overwrite=True)
         except Exception as e:
-            print('  Failed to find sources in this file', file=sys.stderr)
-            print('  Caused by:', e, file=sys.stderr)
+            logger.warning('  Failed to find sources in this file')
+            logger.warning('  Caused by: %s')
             continue
 
         # Generate the Astrometry.Net index
@@ -131,7 +131,7 @@ def go(
         ]
 
         index_log = os.path.join(work_dir, f'build-index-{fits_num}.log')
-        print('  Generating Astrometry.Net index ...')
+        logger.info('  Generating Astrometry.Net index ...')
 
         try:
             with open(index_log, 'wb') as log:
@@ -142,8 +142,8 @@ def go(
                     shell = False,
                 )
         except Exception as e:
-            print('  Failed to index this file', file=sys.stderr)
-            print('  Caused by:', e, file=sys.stderr)
+            logger.warning('  Failed to index this file')
+            logger.warning('  Caused by: %s', e)
             continue
 
         # Success!
@@ -188,7 +188,7 @@ def go(
     ]
 
     solve_log = os.path.join(work_dir, 'solve-field.log')
-    print('Launching Astrometry.Net solver for', rgb_path, '...')
+    logger.info('Launching Astrometry.Net solver for `%s` ...', rgb_path)
 
     with open(solve_log, 'wb') as log:
         subprocess.check_call(
@@ -230,13 +230,13 @@ def go(
     output_ext = os.path.splitext(output_path)[1].lower()
 
     if input_ext != output_ext:
-        print('Converting input image to create:', output_path)
+        logger.info('Converting input image to create `%s`', output_path)
         img.save(output_path, format=output_ext.replace('.', ''))
 
-        print('Adding AVM tags to:', output_path)
+        logger.info('Adding AVM tags to `%s`', output_path)
         avm.embed(output_path, output_path)
     else:
-        print('Writing AVM-tagged image to:', output_path)
+        logger.info('Writing AVM-tagged image to:`%s`', output_path)
         avm.embed(rgb_path, output_path)
 
     # Tile it for WWT, if requested
@@ -245,7 +245,7 @@ def go(
         from toasty.merge import averaging_merger, cascade_images
         from toasty.pyramid import PyramidIO
 
-        print('Creating base layer of WWT tiling ...')
+        logger.info('Creating base layer of WWT tiling ...')
 
         pio = PyramidIO(tile_path, default_format=img.default_format)
         builder = Builder(pio)
@@ -255,7 +255,7 @@ def go(
         builder.set_name(in_name_pieces[0])
         builder.write_index_rel_wtml()
 
-        print('Cascading tiles ...')
+        logger.info('Cascading tiles ...')
         cascade_images(
             pio,
             builder.imgset.tile_levels,

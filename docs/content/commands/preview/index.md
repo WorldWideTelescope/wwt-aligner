@@ -27,6 +27,9 @@ The `--port=PORT` option allows you to override the default port number for the
 preview HTTP service, which is 17001. You might need to use this if you want to
 run multiple preview commands simultaneously.
 
+The [generic command-line arguments](@/commands/_index.md#generic-command-line-arguments)
+are also supported.
+
 # Remarks
 
 This program is somewhat limited in its funtionality because the HTTP server

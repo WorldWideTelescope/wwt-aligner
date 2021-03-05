@@ -1,4 +1,4 @@
-# Copyright 2020 the .NET Foundation
+# Copyright 2020-2021 the .NET Foundation
 # Licensed under the MIT License.
 
 """
@@ -7,13 +7,16 @@ Entrypoint for the "wwt-aligner[-agent]" command-line interface.
 """
 import argparse
 import json
+import logging
 import os.path
 import shutil
 import sys
 import tempfile
+import time
 
 __all__ = ['entrypoint']
 
+from . import logger
 
 # General CLI utilities
 
@@ -307,6 +310,13 @@ def entrypoint(args=None):
         if py_name.endswith('_getparser'):
             cmd_name = py_name[:-10].replace('_', '-')
             subparser = subparsers.add_parser(cmd_name)
+            subparser.add_argument(
+                '--log',
+                dest = 'log_level',
+                default = 'default',
+                choices = ['default', 'debug', 'info', 'warning'],
+                help = 'The amount of logging information to emit',
+            )
             value(subparser)
             commands.add(cmd_name)
 
@@ -315,6 +325,28 @@ def entrypoint(args=None):
     # Note that if `--help` is given, parse_args() may not return.
 
     settings = parser.parse_args(args)
+
+    # Set up the logging
+
+    if settings.log_level == 'default':
+        log_level = logging.INFO
+        log_format = '%(message)s'
+        log_stream = sys.stdout
+    else:
+        log_level = getattr(logging, settings.log_level.upper(), None)
+        if not isinstance(log_level, int):
+            die(f'invalid log level "{settings.log_level}"')
+
+        log_format = '%(asctime)s: %(message)s'
+        log_stream = sys.stderr
+
+    sh = logging.StreamHandler(stream=log_stream)
+    sh.setLevel(log_level)
+    sh.setFormatter(logging.Formatter(log_format, datefmt='%H:%M:%S'))
+    logger.setLevel(log_level)
+    logger.addHandler(sh)
+
+    # Next, look into the subcommand
 
     if settings.subcommand is None:
         print('Run me with --help for help. Allowed subcommands are:')
@@ -326,6 +358,8 @@ def entrypoint(args=None):
     py_name = settings.subcommand.replace('-', '_')
 
     if not settings.analyze_args_mode:
+        logger.debug('wwt-aligner agent: starting at %s', time.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
         # Just Do It.
         impl = globals().get(py_name + '_impl')
         if impl is None:
@@ -341,6 +375,8 @@ def entrypoint(args=None):
 
         builder = ArgsProtocolBuilder()
         builder.add_arg(settings.subcommand)
+        builder.add_arg('--log=', incomplete=True)
+        builder.add_arg(settings.log_level)
         aa(builder, settings)
         builder.write_as_json(sys.stdout)
         print()
