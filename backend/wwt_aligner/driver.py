@@ -175,10 +175,6 @@ def go(
             print('index', p, file=f)
 
     # Solve our input image
-    #
-    # XXX we can't use the "WCS" file super conveniently because it doesn't
-    # contain NAXIS data. It would be nice if we could because it's small and we
-    # could avoid rewriting the full image data. XXXX: use IMAGEW, IMAGEH.
 
     wcs_file = os.path.join(work_dir, 'solved.fits')
 
@@ -195,7 +191,7 @@ def go(
         '-N', wcs_file,
         '--no-plots',
         '--no-tweak',
-        '--downsample', '2',
+        '--downsample', '2',  # XXX this should probably not be hardcoded
         rgb_path,
     ]
     logger.debug('solve command: %s', ' '.join(argv))
@@ -227,8 +223,9 @@ def go(
 
         raise
 
-    # Convert solution to AVM, with hardcoded parity
-    # inversion
+    # Convert solution to AVM, with hardcoded parity inversion.
+    #
+    # TODO: map positive parity into both AVM and WWT metadata correctly.
 
     img = ImageLoader().load_path(rgb_path)
 
