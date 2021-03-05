@@ -38,7 +38,7 @@ system, install the [wwt_data_formats Python package][wwtdf] and use the
 [wwtdatatool preview] and/or [wwtdatatool serve] commands. That package provides
 a variety of other tools that are helpful for manipulating WTML files.
 
-[wwtdf]: https://wwt-data-formats.readthedocs.io/index.html
+[wwtdf]: https://wwt-data-formats.readthedocs.io/
 [wwtdatatool preview]: https://wwt-data-formats.readthedocs.io/en/latest/cli/preview.html
 [wwtdatatool serve]: https://wwt-data-formats.readthedocs.io/en/latest/cli/serve.html
 
