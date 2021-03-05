@@ -22,6 +22,7 @@ from toasty.image import ImageLoader
 
 from . import logger
 
+DEFAULT_SOLVE_TIME_LIMIT = 60 # seconds
 
 def image_size_to_anet_preset(size_deg):
     """
@@ -59,7 +60,9 @@ def go(
             data = None
 
             with fits.open(fits_path) as hdul:
-                for hdu in hdul:
+                for hdu_num, hdu in enumerate(hdul):
+                    logger.debug('  considering HDU #%d; data shape %r', hdu_num, hdu.shape)
+
                     if hdu.data is None:
                         continue  # reject: no data
 
@@ -88,6 +91,7 @@ def go(
             large_scale = coords[2].separation(coords[3])
             logger.debug('  large scale for this image: %e deg', large_scale.deg)
             width = coords[4].separation(coords[5])
+            logger.debug('  characteristic width for this image: %e deg', width.deg)
         except Exception as e:
             logger.warning('  Failed to read image data from this file')
             logger.warning('  Caused by: %s', e)
@@ -99,12 +103,12 @@ def go(
 
         try:
             bkg = sep.Background(data)
-            #print('SEP background level:', bkg.globalback)
-            #print('SEP background rms:', bkg.globalrms)
+            logger.debug('  SEP background level: %e', bkg.globalback)
+            logger.debug('  SEP background rms: %e', bkg.globalrms)
 
             bkg.subfrom(data)
             objects = sep.extract(data, 3, err=bkg.globalrms)
-            #print('SEP object count:', len(objects))
+            logger.debug('  SEP object count: %d', len(objects))
 
             coords = wcs.pixel_to_world(objects['x'], objects['y'])
             tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
@@ -124,11 +128,13 @@ def go(
             anet_bin_prefix + 'build-astrometry-index',
             '-i', objects_fits,
             '-o', index_fits,
+            '-I', str(fits_num),
             '-E',  # objects table is much less than all-sky
             '-f',  # our sort column is flux-like, not mag-like
             '-S', 'FLUX',
             '-P', str(image_size_to_anet_preset(large_scale.deg))
         ]
+        logger.debug('  index command: %s', ' '.join(argv))
 
         index_log = os.path.join(work_dir, f'build-index-{fits_num}.log')
         logger.info('  Generating Astrometry.Net index ...')
@@ -178,7 +184,7 @@ def go(
         '--scale-units', 'arcminwidth',
         '--scale-low', str(width.arcmin / 2),
         '--scale-high', str(width.arcmin * 2),
-        '--cpulimit', '600',  # seconds
+        '--cpulimit', str(DEFAULT_SOLVE_TIME_LIMIT),  # seconds
         '--dir', work_dir,
         '-N', wcs_file,
         '--no-plots',
@@ -186,17 +192,34 @@ def go(
         '--downsample', '2',
         rgb_path,
     ]
+    logger.debug('solve command: %s', ' '.join(argv))
 
     solve_log = os.path.join(work_dir, 'solve-field.log')
     logger.info('Launching Astrometry.Net solver for `%s` ...', rgb_path)
 
-    with open(solve_log, 'wb') as log:
-        subprocess.check_call(
-            argv,
-            stdout = log,
-            stderr = subprocess.STDOUT,
-            shell = False,
-        )
+    try:
+        with open(solve_log, 'wb') as log:
+            subprocess.check_call(
+                argv,
+                stdout = log,
+                stderr = subprocess.STDOUT,
+                shell = False,
+            )
+
+        assert os.path.exists(wcs_file), 'Astrometry.Net did not emit a solution file'
+    except Exception as e:
+        logger.error('  Failed to solve this image')
+        logger.error('  Proximate Python exception: %s', e)
+        logger.error('  Output from solve-field:')
+
+        try:
+            with open(solve_log, 'r') as f:
+                for line in f:
+                    logger.error('    %s', line.rstrip())
+        except Exception as sub_e:
+            logger.error('     [failed to read the log! error: %s]', sub_e)
+
+        raise
 
     # Convert solution to AVM, with hardcoded parity
     # inversion

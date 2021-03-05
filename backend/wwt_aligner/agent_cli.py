@@ -227,7 +227,7 @@ def go_impl(settings):
         # https://newton.cx/~peter/howto/correctly-cancel-python-shell/
         return 1
     except Exception as e:
-        print('fatal error: the alignment process failed', file=sys.stderr)
+        print('fatal error: the alignment process failed:', e, file=sys.stderr)
         return 1
     finally:
         shutil.rmtree(work_dir)
