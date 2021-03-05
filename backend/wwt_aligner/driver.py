@@ -16,9 +16,13 @@ from PIL import Image as pil_image
 from pyavm import AVM
 import sep
 import subprocess
+import sys
 from toasty.builder import Builder
 from toasty.image import ImageLoader
 
+from . import logger
+
+DEFAULT_SOLVE_TIME_LIMIT = 90 # seconds
 
 def image_size_to_anet_preset(size_deg):
     """
@@ -47,49 +51,79 @@ def go(
     index_fits_list = []
 
     for fits_num, fits_path in enumerate(fits_paths):
-        print('Processing reference science image', fits_path, '...')
+        logger.info('Processing reference science image `%s` ...', fits_path)
 
         # Check our FITS image and get some basic quantities. We need
         # to read in the data to sourcefind with SEP.
 
-        with fits.open(fits_path) as hdul:
-            hdu = hdul[0]
-            wcs = WCS(hdu)
-            data = hdu.data
-            height, width = data.shape[-2:]
+        try:
+            data = None
 
-        data = data.byteswap(inplace=True).newbyteorder()
+            with fits.open(fits_path) as hdul:
+                for hdu_num, hdu in enumerate(hdul):
+                    logger.debug('  considering HDU #%d; data shape %r', hdu_num, hdu.shape)
 
-        midx = width // 2
-        midy = height // 2
-        coords = wcs.pixel_to_world(
-            [midx, midx + 1, 0, width, 0, width],
-            [midy, midy + 1, 0, height, midy, midy],
-        )
+                    if hdu.data is None:
+                        continue  # reject: no data
 
-        small_scale = coords[0].separation(coords[1])
-        #print('small scale:', small_scale)
-        large_scale = coords[2].separation(coords[3])
-        #print('large scale:', large_scale)
-        width = coords[4].separation(coords[5])
+                    if hasattr(hdu, 'columns'):
+                        continue  # reject: tabular
+
+                    if len(hdu.shape) < 2:
+                        continue  # reject: not at least 2D
+
+                    # OK, it looks like this the HDU we want!
+                    wcs = WCS(hdu)
+                    data = hdu.data
+                    height, width = data.shape[-2:]
+                    break
+
+            assert data is not None, 'failed to find a usable image HDU'
+            data = data.byteswap(inplace=True).newbyteorder()
+
+            midx = width // 2
+            midy = height // 2
+            coords = wcs.pixel_to_world(
+                [midx, midx + 1, 0, width, 0, width],
+                [midy, midy + 1, 0, height, midy, midy],
+            )
+
+            large_scale = coords[2].separation(coords[3])
+            logger.debug('  large scale for this image: %e deg', large_scale.deg)
+            width = coords[4].separation(coords[5])
+            logger.debug('  characteristic width for this image: %e deg', width.deg)
+        except Exception as e:
+            logger.warning('  Failed to read image data from this file')
+            logger.warning('  Caused by: %s', e)
+            continue
 
         # Use SEP to find sources
 
-        print('   Finding sources ...')
+        logger.info('  Finding sources ...')
 
-        bkg = sep.Background(data)
-        #print('SEP background level:', bkg.globalback)
-        #print('SEP background rms:', bkg.globalrms)
+        try:
+            bkg = sep.Background(
+                data,
+                bw=32, bh=32,
+                fw=3, fh=3,
+                fthresh=0.0,
+            )
+            logger.debug('  SEP background level: %e', bkg.globalback)
+            logger.debug('  SEP background rms: %e', bkg.globalrms)
 
-        bkg.subfrom(data)
-        objects = sep.extract(data, 3, err=bkg.globalrms)
-        #print('SEP object count:', len(objects))
+            bkg.subfrom(data)
+            objects = sep.extract(data, 3, err=bkg.globalrms)
+            logger.debug('  SEP object count: %d', len(objects))
 
-        coords = wcs.pixel_to_world(objects['x'], objects['y'])
-        tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
+            coords = wcs.pixel_to_world(objects['x'], objects['y'])
+            tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
 
-        objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
-        tbl.write(objects_fits, format='fits', overwrite=True)
+            objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
+            tbl.write(objects_fits, format='fits', overwrite=True)
+        except Exception as e:
+            logger.warning('  Failed to find sources in this file')
+            logger.warning('  Caused by: %s', e)
+            continue
 
         # Generate the Astrometry.Net index
 
@@ -99,24 +133,35 @@ def go(
             anet_bin_prefix + 'build-astrometry-index',
             '-i', objects_fits,
             '-o', index_fits,
+            '-I', str(fits_num),
             '-E',  # objects table is much less than all-sky
             '-f',  # our sort column is flux-like, not mag-like
             '-S', 'FLUX',
-            '-P', str(image_size_to_anet_preset(large_scale.deg))
+            '-P', str(image_size_to_anet_preset(large_scale.deg)),
         ]
+        logger.debug('  index command: %s', ' '.join(argv))
 
         index_log = os.path.join(work_dir, f'build-index-{fits_num}.log')
-        print('   Generating Astrometry.Net index ...')
+        logger.info('  Generating Astrometry.Net index ...')
 
-        with open(index_log, 'wb') as log:
-            subprocess.check_call(
-                argv,
-                stdout = log,
-                stderr = subprocess.STDOUT,
-                shell = False,
-            )
+        try:
+            with open(index_log, 'wb') as log:
+                subprocess.check_call(
+                    argv,
+                    stdout = log,
+                    stderr = subprocess.STDOUT,
+                    shell = False,
+                )
+        except Exception as e:
+            logger.warning('  Failed to index this file')
+            logger.warning('  Caused by: %s', e)
+            continue
 
+        # Success!
         index_fits_list.append(index_fits)
+
+    if not index_fits_list:
+        raise Exception('cannot align: failed to index any of the input FITS files')
 
     # Write out config file
 
@@ -130,42 +175,57 @@ def go(
             print('index', p, file=f)
 
     # Solve our input image
-    #
-    # XXX we can't use the "WCS" file super conveniently because it doesn't
-    # contain NAXIS data. It would be nice if we could because it's small and we
-    # could avoid rewriting the full image data. XXXX: use IMAGEW, IMAGEH.
 
     wcs_file = os.path.join(work_dir, 'solved.fits')
 
     # https://manpages.debian.org/testing/astrometry.net/solve-field.1.en.html
     argv = [
         anet_bin_prefix + 'solve-field',
+        '-v',
         '--config', cfg_path,
         '--scale-units', 'arcminwidth',
         '--scale-low', str(width.arcmin / 2),
         '--scale-high', str(width.arcmin * 2),
-        '--cpulimit', '600',  # seconds
+        '--cpulimit', str(DEFAULT_SOLVE_TIME_LIMIT),  # seconds
         '--dir', work_dir,
         '-N', wcs_file,
         '--no-plots',
         '--no-tweak',
-        '--downsample', '2',
+        '--downsample', '2',  # XXX this should probably not be hardcoded
         rgb_path,
     ]
+    logger.debug('solve command: %s', ' '.join(argv))
 
     solve_log = os.path.join(work_dir, 'solve-field.log')
-    print('Launching Astrometry.Net solver for', rgb_path, '...')
+    logger.info('Launching Astrometry.Net solver for `%s` ...', rgb_path)
 
-    with open(solve_log, 'wb') as log:
-        subprocess.check_call(
-            argv,
-            stdout = log,
-            stderr = subprocess.STDOUT,
-            shell = False,
-        )
+    try:
+        with open(solve_log, 'wb') as log:
+            subprocess.check_call(
+                argv,
+                stdout = log,
+                stderr = subprocess.STDOUT,
+                shell = False,
+            )
 
-    # Convert solution to AVM, with hardcoded parity
-    # inversion
+        assert os.path.exists(wcs_file), 'Astrometry.Net did not emit a solution file'
+    except Exception as e:
+        logger.error('  Failed to solve this image')
+        logger.error('  Proximate Python exception: %s', e)
+        logger.error('  Output from solve-field:')
+
+        try:
+            with open(solve_log, 'r') as f:
+                for line in f:
+                    logger.error('    %s', line.rstrip())
+        except Exception as sub_e:
+            logger.error('     [failed to read the log! error: %s]', sub_e)
+
+        raise
+
+    # Convert solution to AVM, with hardcoded parity inversion.
+    #
+    # TODO: map positive parity into both AVM and WWT metadata correctly.
 
     img = ImageLoader().load_path(rgb_path)
 
@@ -178,7 +238,7 @@ def go(
     hdwork['PC1_2'] *= -1
     hdwork['PC2_2'] *= -1
     wcs = WCS(hdwork)
-    avm = AVM.from_wcs(wcs)
+    avm = AVM.from_wcs(wcs, shape=(img.height, img.width))
 
     # Apply AVM
     #
@@ -196,13 +256,13 @@ def go(
     output_ext = os.path.splitext(output_path)[1].lower()
 
     if input_ext != output_ext:
-        print('Converting input image to create:', output_path)
+        logger.info('Converting input image to create `%s`', output_path)
         img.save(output_path, format=output_ext.replace('.', ''))
 
-        print('Adding AVM tags to:', output_path)
+        logger.info('Adding AVM tags to `%s`', output_path)
         avm.embed(output_path, output_path)
     else:
-        print('Writing AVM-tagged image to:', output_path)
+        logger.info('Writing AVM-tagged image to:`%s`', output_path)
         avm.embed(rgb_path, output_path)
 
     # Tile it for WWT, if requested
@@ -211,7 +271,7 @@ def go(
         from toasty.merge import averaging_merger, cascade_images
         from toasty.pyramid import PyramidIO
 
-        print('Creating base layer of WWT tiling ...')
+        logger.info('Creating base layer of WWT tiling ...')
 
         pio = PyramidIO(tile_path, default_format=img.default_format)
         builder = Builder(pio)
@@ -221,7 +281,7 @@ def go(
         builder.set_name(in_name_pieces[0])
         builder.write_index_rel_wtml()
 
-        print('Cascading tiles ...')
+        logger.info('Cascading tiles ...')
         cascade_images(
             pio,
             builder.imgset.tile_levels,

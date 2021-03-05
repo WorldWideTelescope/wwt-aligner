@@ -14,9 +14,15 @@ provides a small “frontend” command-line tool, `wwt-aligner`, that launches 
 [Docker]: https://www.docker.com/
 
 
-## Installation
+## Installation and Documentation
 
-Instructions to come.
+Installation instructions may be found here:
+
+> https://docs.worldwidetelescope.org/aligner/latest/installation/
+
+The main documentation may be [found here][docs].
+
+[docs]: https://docs.worldwidetelescope.org/aligner/latest/
 
 
 ## Acknowledgments

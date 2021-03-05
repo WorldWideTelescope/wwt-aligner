@@ -1,4 +1,4 @@
-# Copyright 2020 the .NET Foundation
+# Copyright 2020-2021 the .NET Foundation
 # Licensed under the MIT License.
 
 """
@@ -7,13 +7,16 @@ Entrypoint for the "wwt-aligner[-agent]" command-line interface.
 """
 import argparse
 import json
+import logging
 import os.path
 import shutil
 import sys
 import tempfile
+import time
 
 __all__ = ['entrypoint']
 
+from . import logger
 
 # General CLI utilities
 
@@ -175,6 +178,11 @@ def go_getparser(parser):
         help = 'The path to output the image in AAS WorldWide Telescope tiled format',
     )
     parser.add_argument(
+        '--workdir', '-W',
+        dest = 'work_path',
+        help = 'Create this directory for work files; do not delete them after finishing up',
+    )
+    parser.add_argument(
         'rgb_path',
         metavar = 'RGB-PATH',
         help = 'The path to input file to solve',
@@ -198,6 +206,10 @@ def go_analyze_args(builder, settings):
         builder.add_arg('--tile=', incomplete=True)
         builder.add_path_arg(settings.tile_path, created=True)
 
+    if settings.work_path:
+        builder.add_arg('--workdir=', incomplete=True)
+        builder.add_path_arg(settings.work_path, created=True)
+
     builder.add_path_arg(settings.rgb_path, pre_exists=True)
 
     for p in settings.fits_paths:
@@ -207,16 +219,69 @@ def go_analyze_args(builder, settings):
 def go_impl(settings):
     from .driver import go
 
-    work_dir = tempfile.mkdtemp()
-    go(
-        rgb_path = settings.rgb_path,
-        fits_paths = settings.fits_paths,
-        output_path = settings.output_path,
-        tile_path = settings.tile_path,
-        work_dir = work_dir,
-        anet_bin_prefix = settings.anet_bin_prefix,
+    if settings.work_path is not None:
+        work_dir = settings.work_path
+        os.mkdir(work_dir)
+    else:
+        work_dir = tempfile.mkdtemp()
+
+    try:
+        go(
+            rgb_path = settings.rgb_path,
+            fits_paths = settings.fits_paths,
+            output_path = settings.output_path,
+            tile_path = settings.tile_path,
+            work_dir = work_dir,
+            anet_bin_prefix = settings.anet_bin_prefix,
+        )
+    except KeyboardInterrupt:
+        print('\nfatal error: the alignment process was interrupted', file=sys.stderr)
+        # This is actually less than ideal behavior; see
+        # https://newton.cx/~peter/howto/correctly-cancel-python-shell/
+        return 1
+    except Exception as e:
+        print('fatal error: the alignment process failed:', e, file=sys.stderr)
+        return 1
+    finally:
+        # Only blow away work files if we made a tempdir!
+        if settings.work_path is None:
+            shutil.rmtree(work_dir)
+
+    return 0
+
+
+# "serve-wtml" subcommand
+
+def serve_wtml_getparser(parser):
+    parser.add_argument(
+        '--port',
+        metavar = 'NUMBER',
+        type = int,
+        default = 17001,
+        help = 'The port number on which to run the HTTP service',
     )
-    shutil.rmtree(work_dir)
+    parser.add_argument(
+        'wtml_path',
+        metavar = 'WTML-PATH',
+        help = 'The path to the WTML file to serve',
+    )
+
+
+def serve_wtml_analyze_args(builder, settings):
+    builder.add_arg('--port=', incomplete=True)
+    builder.add_arg(settings.port)
+    builder.add_published_port(settings.port, 8080)
+
+    builder.add_path_arg(settings.wtml_path, pre_exists=True)
+
+
+def serve_wtml_impl(settings):
+    from wwt_data_formats.server import run_server
+
+    serve_settings = argparse.Namespace()
+    serve_settings.port = 8080
+    serve_settings.root_dir = os.path.dirname(settings.wtml_path) or '.'
+    run_server(serve_settings)
 
 
 # The CLI driver:
@@ -260,6 +325,13 @@ def entrypoint(args=None):
         if py_name.endswith('_getparser'):
             cmd_name = py_name[:-10].replace('_', '-')
             subparser = subparsers.add_parser(cmd_name)
+            subparser.add_argument(
+                '--log',
+                dest = 'log_level',
+                default = 'default',
+                choices = ['default', 'debug', 'info', 'warning'],
+                help = 'The amount of logging information to emit',
+            )
             value(subparser)
             commands.add(cmd_name)
 
@@ -268,6 +340,28 @@ def entrypoint(args=None):
     # Note that if `--help` is given, parse_args() may not return.
 
     settings = parser.parse_args(args)
+
+    # Set up the logging
+
+    if settings.log_level == 'default':
+        log_level = logging.INFO
+        log_format = '%(message)s'
+        log_stream = sys.stdout
+    else:
+        log_level = getattr(logging, settings.log_level.upper(), None)
+        if not isinstance(log_level, int):
+            die(f'invalid log level "{settings.log_level}"')
+
+        log_format = '%(asctime)s: %(message)s'
+        log_stream = sys.stderr
+
+    sh = logging.StreamHandler(stream=log_stream)
+    sh.setLevel(log_level)
+    sh.setFormatter(logging.Formatter(log_format, datefmt='%H:%M:%S'))
+    logger.setLevel(log_level)
+    logger.addHandler(sh)
+
+    # Next, look into the subcommand
 
     if settings.subcommand is None:
         print('Run me with --help for help. Allowed subcommands are:')
@@ -279,12 +373,15 @@ def entrypoint(args=None):
     py_name = settings.subcommand.replace('-', '_')
 
     if not settings.analyze_args_mode:
+        logger.debug('wwt-aligner agent: starting at %s', time.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
         # Just Do It.
         impl = globals().get(py_name + '_impl')
         if impl is None:
             die('no such subcommand "{}"'.format(settings.subcommand))
 
-        impl(settings)
+        rv = impl(settings) or 0
+        sys.exit(rv)
     else:
         # We're in args-analysis mode.
         aa = globals().get(py_name + '_analyze_args')
@@ -293,6 +390,8 @@ def entrypoint(args=None):
 
         builder = ArgsProtocolBuilder()
         builder.add_arg(settings.subcommand)
+        builder.add_arg('--log=', incomplete=True)
+        builder.add_arg(settings.log_level)
         aa(builder, settings)
         builder.write_as_json(sys.stdout)
         print()
