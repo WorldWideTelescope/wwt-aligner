@@ -35,6 +35,7 @@ not in one of these formats, it will be converted.
 wwt-aligner go
     -o|--output {OUTPUT-PATH}
     [-t|--tile TILE-PATH]
+    [-W|--workdir WORK-PATH]
     [--anet-bin-prefix PREFIX]
     {RGB-PATH}
     {FITS-PATH} [FITS-PATHS ...]
@@ -56,6 +57,10 @@ command:
 $ wwt-aligner go -o aligned.jpg -t tiled input.tif reference.fits
 $ wwt-aligner preview tiled/index_rel.wtml
 ```
+
+The `-W WORK-DIR` option causes the tool to save its working files in the
+specified directory, as opposed to using a temporary directory. This can be
+useful for low-level debugging of the alignment process.
 
 The `--anet-bin-prefix` option can be ignored in almost all use cases. If you
 are testing the agent outside of the Docker container, you can use it to tell

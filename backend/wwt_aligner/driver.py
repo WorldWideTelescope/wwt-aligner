@@ -22,7 +22,7 @@ from toasty.image import ImageLoader
 
 from . import logger
 
-DEFAULT_SOLVE_TIME_LIMIT = 60 # seconds
+DEFAULT_SOLVE_TIME_LIMIT = 90 # seconds
 
 def image_size_to_anet_preset(size_deg):
     """
@@ -102,7 +102,12 @@ def go(
         logger.info('  Finding sources ...')
 
         try:
-            bkg = sep.Background(data)
+            bkg = sep.Background(
+                data,
+                bw=32, bh=32,
+                fw=3, fh=3,
+                fthresh=0.0,
+            )
             logger.debug('  SEP background level: %e', bkg.globalback)
             logger.debug('  SEP background rms: %e', bkg.globalrms)
 
@@ -117,7 +122,7 @@ def go(
             tbl.write(objects_fits, format='fits', overwrite=True)
         except Exception as e:
             logger.warning('  Failed to find sources in this file')
-            logger.warning('  Caused by: %s')
+            logger.warning('  Caused by: %s', e)
             continue
 
         # Generate the Astrometry.Net index
@@ -132,7 +137,7 @@ def go(
             '-E',  # objects table is much less than all-sky
             '-f',  # our sort column is flux-like, not mag-like
             '-S', 'FLUX',
-            '-P', str(image_size_to_anet_preset(large_scale.deg))
+            '-P', str(image_size_to_anet_preset(large_scale.deg)),
         ]
         logger.debug('  index command: %s', ' '.join(argv))
 
@@ -180,6 +185,7 @@ def go(
     # https://manpages.debian.org/testing/astrometry.net/solve-field.1.en.html
     argv = [
         anet_bin_prefix + 'solve-field',
+        '-v',
         '--config', cfg_path,
         '--scale-units', 'arcminwidth',
         '--scale-low', str(width.arcmin / 2),

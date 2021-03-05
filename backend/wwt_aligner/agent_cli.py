@@ -178,6 +178,11 @@ def go_getparser(parser):
         help = 'The path to output the image in AAS WorldWide Telescope tiled format',
     )
     parser.add_argument(
+        '--workdir', '-W',
+        dest = 'work_path',
+        help = 'Create this directory for work files; do not delete them after finishing up',
+    )
+    parser.add_argument(
         'rgb_path',
         metavar = 'RGB-PATH',
         help = 'The path to input file to solve',
@@ -201,6 +206,10 @@ def go_analyze_args(builder, settings):
         builder.add_arg('--tile=', incomplete=True)
         builder.add_path_arg(settings.tile_path, created=True)
 
+    if settings.work_path:
+        builder.add_arg('--workdir=', incomplete=True)
+        builder.add_path_arg(settings.work_path, created=True)
+
     builder.add_path_arg(settings.rgb_path, pre_exists=True)
 
     for p in settings.fits_paths:
@@ -210,7 +219,11 @@ def go_analyze_args(builder, settings):
 def go_impl(settings):
     from .driver import go
 
-    work_dir = tempfile.mkdtemp()
+    if settings.work_path is not None:
+        work_dir = settings.work_path
+        os.mkdir(work_dir)
+    else:
+        work_dir = tempfile.mkdtemp()
 
     try:
         go(
@@ -230,7 +243,9 @@ def go_impl(settings):
         print('fatal error: the alignment process failed:', e, file=sys.stderr)
         return 1
     finally:
-        shutil.rmtree(work_dir)
+        # Only blow away work files if we made a tempdir!
+        if settings.work_path is None:
+            shutil.rmtree(work_dir)
 
     return 0
 
