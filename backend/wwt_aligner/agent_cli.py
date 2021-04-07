@@ -158,6 +158,35 @@ class ArgsProtocolBuilder(object):
         json.dump(data, fp, ensure_ascii=False, indent=2, sort_keys=True)
 
 
+# "diagnostic" subcommands
+
+def diagnostic_getparser(parser):
+    subparsers = parser.add_subparsers(dest="diagnostic_subcommand")
+
+    p = subparsers.add_parser('plot-fits-sources')
+    p.add_argument(
+        'fits_path',
+        metavar = 'FITS-PATH',
+        help = 'The path to input FITS file',
+    )
+
+def diagnostic_analyze_args(builder, settings):
+    builder.add_arg(settings.diagnostic_subcommand)
+
+    if settings.diagnostic_subcommand == 'plot-fits-sources':
+        builder.add_path_arg(settings.fits_path, pre_exists=True)
+
+def diagnostic_impl(settings):
+    if settings.diagnostic_subcommand == 'plot-fits-sources':
+        diagnostic_plot_fits_sources_impl(settings)
+    else:
+        die('must specify a diagnostic subcommand; run me with `--help` to see options')
+
+def diagnostic_plot_fits_sources_impl(settings):
+    from .driver import plot_fits_sources
+    plot_fits_sources(settings.fits_path)
+
+
 # "go" subcommand
 
 def go_getparser(parser):

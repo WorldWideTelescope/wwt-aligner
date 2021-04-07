@@ -5,7 +5,10 @@
 Main tool driver.
 """
 
-__all__ = ['go']
+__all__ = [
+    'go',
+    'plot_fits_sources',
+]
 
 from astropy.io import fits
 from astropy.table import Table
@@ -134,6 +137,49 @@ def source_extract_fits(
 
     # All done!
     return info
+
+
+def plot_fits_sources(fits_path):
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Ellipse
+    from matplotlib import rcParams
+
+    rcParams['figure.figsize'] = [14., 14.]
+
+    try:
+        info = source_extract_fits(fits_path)
+    except Exception as e:
+        raise Exception(f'could not extract sources from `{fits_path}`') from e
+
+    # This stuff derived from the SEP documentation.
+
+    fig, ax = plt.subplots()
+    m = np.mean(info.bgsub_data)
+    s = np.std(info.bgsub_data)
+    im = ax.imshow(
+        info.bgsub_data,
+        interpolation = 'nearest',
+        cmap = 'gray',
+        vmin = m - s,
+        vmax = m + s,
+        origin='lower',
+    )
+
+    for i in range(len(info.sep_objects)):
+        e = Ellipse(
+            xy = (info.sep_objects['x'][i], info.sep_objects['y'][i]),
+            width = 6 * info.sep_objects['a'][i],
+            height = 6 * info.sep_objects['b'][i],
+            angle = info.sep_objects['theta'][i] * 180. / np.pi,
+        )
+        e.set_facecolor('none')
+        e.set_edgecolor('red')
+        ax.add_artist(e)
+
+    fig.tight_layout()
+    img_path = os.path.splitext(fits_path)[0] + '_sources.png'
+    fig.savefig(img_path)
+    logger.debug('saved sources image to `%s`', img_path)
 
 
 def go(
