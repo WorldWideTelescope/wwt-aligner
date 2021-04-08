@@ -5,12 +5,17 @@
 Main tool driver.
 """
 
-__all__ = ['go']
+__all__ = [
+    'go',
+    'plot_fits_sources',
+]
 
 from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
+from dataclasses import dataclass
 import math
+import numpy as np
 import os.path
 from PIL import Image as pil_image
 from pyavm import AVM
@@ -22,19 +27,161 @@ from toasty.image import ImageLoader
 
 from . import logger
 
-DEFAULT_SOLVE_TIME_LIMIT = 90 # seconds
+DEFAULT_SOLVE_TIME_LIMIT = 30 # seconds
 
 def image_size_to_anet_preset(size_deg):
     """
     Get an astrometry.net "preset" size from an image size. Docs say:
 
-    0 => ~6 arcmin
+    0 => ~6 arcmin image width
     2 => ~12 arcmin
     4 => ~24 arcmin
 
-    etc.
+    etc. Our "size_deg" parameter is the diagonal size of the image,
+    which offsets the calculation by one step or so. The minimum
+    allowed preset is -5.
     """
-    return 6 + 2 * math.log2(size_deg)
+    return max(-5, int(np.floor(5 + 2 * math.log2(size_deg))))
+
+
+@dataclass
+class FitsInfo(object):
+    large_scale_deg: float = 0.0
+    width_deg: float = 0.0
+    width_pixels: int = 0
+    height_pixels: int = 0
+    bgsub_data: np.array = None
+    sep_objects: np.array = None
+    wcs_objects: Table = None
+
+@dataclass
+class ExtractionConfig(object):
+    bg_box_size: int = 32
+    bg_filter_size: int = 3
+    bg_filter_threshold: float = 0.0
+    source_threshold: int = 10
+
+def source_extract_fits(
+    fits_path,
+    log_prefix='',
+):
+    info = FitsInfo()
+    config = ExtractionConfig()
+
+    # Figure out the HDU to use, and read data + WCS
+
+    data = None
+
+    with fits.open(fits_path) as hdul:
+        for hdu_num, hdu in enumerate(hdul):
+            logger.debug('%sconsidering HDU #%d; data shape %r', log_prefix, hdu_num, hdu.shape)
+
+            if hdu.data is None:
+                continue  # reject: no data
+
+            if hasattr(hdu, 'columns'):
+                continue  # reject: tabular
+
+            if len(hdu.shape) < 2:
+                continue  # reject: not at least 2D
+
+            # OK, it looks like this the HDU we want!
+            wcs = WCS(hdu)
+            data = hdu.data
+            height, width = data.shape[-2:]
+            break
+
+    assert data is not None, 'failed to find a usable image HDU'
+    data = data.byteswap(inplace=True).newbyteorder()
+
+    # Get some useful housekeeping data
+
+    info.width_pixels = width
+    info.height_pixels = height
+
+    midx = width // 2
+    midy = height // 2
+    coords = wcs.pixel_to_world(
+        [midx, midx + 1, 0, width, 0, width],
+        [midy, midy + 1, 0, height, midy, midy],
+    )
+
+    info.large_scale_deg = coords[2].separation(coords[3]).deg
+    logger.debug('%slarge scale for this image: %e deg', log_prefix, info.large_scale_deg)
+    info.width_deg = coords[4].separation(coords[5]).deg
+    logger.debug('%scharacteristic width for this image: %e deg', log_prefix, info.width_deg)
+
+    # Use SEP to find sources
+
+    logger.info('%sFinding sources ...', log_prefix)
+
+    bkg = sep.Background(
+        data,
+        bw = config.bg_box_size,
+        bh = config.bg_box_size,
+        fw = config.bg_filter_size,
+        fh = config.bg_filter_size,
+        fthresh = config.bg_filter_threshold,
+    )
+    logger.debug('%sSEP background level: %e', log_prefix, bkg.globalback)
+    logger.debug('%sSEP background rms: %e', log_prefix, bkg.globalrms)
+    bkg.subfrom(data)
+    info.bgsub_data = data
+
+    info.sep_objects = sep.extract(data, config.source_threshold, err=bkg.globalrms)
+    logger.debug('%sSEP object count: %d', log_prefix, len(info.sep_objects))
+
+    coords = wcs.pixel_to_world(info.sep_objects['x'], info.sep_objects['y'])
+    info.wcs_objects = Table(
+        [coords.ra.deg, coords.dec.deg, info.sep_objects['flux']],
+        names=('RA', 'DEC', 'FLUX')
+    )
+
+    # All done!
+    return info
+
+
+def plot_fits_sources(fits_path):
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Ellipse
+    from matplotlib import rcParams
+
+    rcParams['figure.figsize'] = [14., 14.]
+
+    try:
+        info = source_extract_fits(fits_path)
+    except Exception as e:
+        raise Exception(f'could not extract sources from `{fits_path}`') from e
+
+    # This stuff derived from the SEP documentation.
+
+    fig, ax = plt.subplots()
+    m = np.mean(info.bgsub_data)
+    s = np.std(info.bgsub_data)
+    im = ax.imshow(
+        info.bgsub_data,
+        interpolation = 'nearest',
+        cmap = 'gray',
+        vmin = m - s,
+        vmax = m + s,
+        origin='lower',
+    )
+
+    for i in range(len(info.sep_objects)):
+        e = Ellipse(
+            xy = (info.sep_objects['x'][i], info.sep_objects['y'][i]),
+            width = 6 * info.sep_objects['a'][i],
+            height = 6 * info.sep_objects['b'][i],
+            angle = info.sep_objects['theta'][i] * 180. / np.pi,
+        )
+        e.set_facecolor('none')
+        e.set_edgecolor('red')
+        ax.add_artist(e)
+
+    fig.tight_layout()
+    img_path = os.path.splitext(fits_path)[0] + '_sources.png'
+    fig.savefig(img_path)
+    logger.debug('saved sources image to `%s`', img_path)
 
 
 def go(
@@ -49,81 +196,20 @@ def go(
     Do the whole thing.
     """
     index_fits_list = []
+    scale_low = scale_high = None
 
     for fits_num, fits_path in enumerate(fits_paths):
         logger.info('Processing reference science image `%s` ...', fits_path)
 
-        # Check our FITS image and get some basic quantities. We need
-        # to read in the data to sourcefind with SEP.
-
         try:
-            data = None
-
-            with fits.open(fits_path) as hdul:
-                for hdu_num, hdu in enumerate(hdul):
-                    logger.debug('  considering HDU #%d; data shape %r', hdu_num, hdu.shape)
-
-                    if hdu.data is None:
-                        continue  # reject: no data
-
-                    if hasattr(hdu, 'columns'):
-                        continue  # reject: tabular
-
-                    if len(hdu.shape) < 2:
-                        continue  # reject: not at least 2D
-
-                    # OK, it looks like this the HDU we want!
-                    wcs = WCS(hdu)
-                    data = hdu.data
-                    height, width = data.shape[-2:]
-                    break
-
-            assert data is not None, 'failed to find a usable image HDU'
-            data = data.byteswap(inplace=True).newbyteorder()
-
-            midx = width // 2
-            midy = height // 2
-            coords = wcs.pixel_to_world(
-                [midx, midx + 1, 0, width, 0, width],
-                [midy, midy + 1, 0, height, midy, midy],
-            )
-
-            large_scale = coords[2].separation(coords[3])
-            logger.debug('  large scale for this image: %e deg', large_scale.deg)
-            width = coords[4].separation(coords[5])
-            logger.debug('  characteristic width for this image: %e deg', width.deg)
+            info = source_extract_fits(fits_path, log_prefix='  ')
         except Exception as e:
-            logger.warning('  Failed to read image data from this file')
+            logger.warning('  Failed to extract sources from this file')
             logger.warning('  Caused by: %s', e)
             continue
 
-        # Use SEP to find sources
-
-        logger.info('  Finding sources ...')
-
-        try:
-            bkg = sep.Background(
-                data,
-                bw=32, bh=32,
-                fw=3, fh=3,
-                fthresh=0.0,
-            )
-            logger.debug('  SEP background level: %e', bkg.globalback)
-            logger.debug('  SEP background rms: %e', bkg.globalrms)
-
-            bkg.subfrom(data)
-            objects = sep.extract(data, 3, err=bkg.globalrms)
-            logger.debug('  SEP object count: %d', len(objects))
-
-            coords = wcs.pixel_to_world(objects['x'], objects['y'])
-            tbl = Table([coords.ra.deg, coords.dec.deg, objects['flux']], names=('RA', 'DEC', 'FLUX'))
-
-            objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
-            tbl.write(objects_fits, format='fits', overwrite=True)
-        except Exception as e:
-            logger.warning('  Failed to find sources in this file')
-            logger.warning('  Caused by: %s', e)
-            continue
+        objects_fits = os.path.join(work_dir, f'objects{fits_num}.fits')
+        info.wcs_objects.write(objects_fits, format='fits', overwrite=True)
 
         # Generate the Astrometry.Net index
 
@@ -137,7 +223,7 @@ def go(
             '-E',  # objects table is much less than all-sky
             '-f',  # our sort column is flux-like, not mag-like
             '-S', 'FLUX',
-            '-P', str(image_size_to_anet_preset(large_scale.deg)),
+            '-P', str(image_size_to_anet_preset(info.large_scale_deg)),
         ]
         logger.debug('  index command: %s', ' '.join(argv))
 
@@ -158,7 +244,18 @@ def go(
             continue
 
         # Success!
+
         index_fits_list.append(index_fits)
+
+        this_scale_low = info.width_deg * 30  # (width in arcmin) / 2
+        this_scale_high = info.width_deg * 120  # (width in arcmin) * 2
+
+        if scale_low is None:
+            scale_low = this_scale_low
+            scale_high = this_scale_high
+        else:
+            scale_low = min(scale_low, this_scale_low)
+            scale_high = max(scale_high, this_scale_high)
 
     if not index_fits_list:
         raise Exception('cannot align: failed to index any of the input FITS files')
@@ -184,8 +281,8 @@ def go(
         '-v',
         '--config', cfg_path,
         '--scale-units', 'arcminwidth',
-        '--scale-low', str(width.arcmin / 2),
-        '--scale-high', str(width.arcmin * 2),
+        '--scale-low', str(scale_low),
+        '--scale-high', str(scale_high),
         '--cpulimit', str(DEFAULT_SOLVE_TIME_LIMIT),  # seconds
         '--dir', work_dir,
         '-N', wcs_file,
