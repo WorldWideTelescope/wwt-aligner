@@ -27,8 +27,6 @@ from toasty.image import ImageLoader
 
 from . import logger
 
-DEFAULT_SOLVE_TIME_LIMIT = 30 # seconds
-
 def image_size_to_anet_preset(size_deg):
     """
     Get an astrometry.net "preset" size from an image size. Docs say:
@@ -184,6 +182,18 @@ def plot_fits_sources(fits_path):
     logger.debug('saved sources image to `%s`', img_path)
 
 
+@dataclass
+class AlignmentConfig(object):
+    scale_range_factor: float = 2.0
+    """How to set the ANet scale-low and scale-high parameters, based on the
+    widths of the reference FITS images."""
+
+    solve_time_limit_seconds: int = 30
+    "The CPU time limit for the solver, in seconds."
+
+    downsample_factor: int = 2
+    "How much to downsample the source RGB image for sourcefinding"
+
 def go(
     fits_paths = None,
     rgb_path = None,
@@ -195,6 +205,7 @@ def go(
     """
     Do the whole thing.
     """
+    cfg = AlignmentConfig()
     index_fits_list = []
     scale_low = scale_high = None
 
@@ -247,8 +258,8 @@ def go(
 
         index_fits_list.append(index_fits)
 
-        this_scale_low = info.width_deg * 30  # (width in arcmin) / 2
-        this_scale_high = info.width_deg * 120  # (width in arcmin) * 2
+        this_scale_low = info.width_deg * 60 / cfg.scale_range_factor  # units are image width in arcmin
+        this_scale_high = info.width_deg * 60 * cfg.scale_range_factor
 
         if scale_low is None:
             scale_low = this_scale_low
@@ -283,12 +294,12 @@ def go(
         '--scale-units', 'arcminwidth',
         '--scale-low', str(scale_low),
         '--scale-high', str(scale_high),
-        '--cpulimit', str(DEFAULT_SOLVE_TIME_LIMIT),  # seconds
+        '--cpulimit', str(cfg.solve_time_limit_seconds),
         '--dir', work_dir,
         '-N', wcs_file,
         '--no-plots',
         '--no-tweak',
-        '--downsample', '2',  # XXX this should probably not be hardcoded
+        '--downsample', str(cfg.downsample_factor),
         rgb_path,
     ]
     logger.debug('solve command: %s', ' '.join(argv))
