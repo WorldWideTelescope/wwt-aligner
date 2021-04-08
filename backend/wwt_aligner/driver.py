@@ -194,6 +194,9 @@ class AlignmentConfig(object):
     downsample_factor: int = 2
     "How much to downsample the source RGB image for sourcefinding"
 
+    object_limit: int = 1000
+    "Limit the number of objects processed from the RGB image"
+
 def go(
     fits_paths = None,
     rgb_path = None,
@@ -295,6 +298,7 @@ def go(
         '--scale-low', str(scale_low),
         '--scale-high', str(scale_high),
         '--cpulimit', str(cfg.solve_time_limit_seconds),
+        '--objs', str(cfg.object_limit),
         '--dir', work_dir,
         '-N', wcs_file,
         '--no-plots',
