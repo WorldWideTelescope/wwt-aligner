@@ -142,14 +142,17 @@ def source_extract_fits(
 def plot_fits_sources(fits_path):
     import matplotlib.pyplot as plt
     from matplotlib.patches import Ellipse
-    from matplotlib import rcParams
-
-    rcParams['figure.figsize'] = [14., 14.]
 
     try:
         info = source_extract_fits(fits_path)
     except Exception as e:
         raise Exception(f'could not extract sources from `{fits_path}`') from e
+
+    # Get the figure to have about as many pixels as the image
+
+    from matplotlib import rcParams
+    DPI = 72
+    rcParams['figure.figsize'] = [info.width_pixels / DPI, info.height_pixels / DPI]
 
     # This stuff derived from the SEP documentation.
 
