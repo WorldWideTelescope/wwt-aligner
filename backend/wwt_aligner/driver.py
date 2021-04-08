@@ -185,6 +185,45 @@ def plot_fits_sources(fits_path):
     logger.debug('saved sources image to `%s`', img_path)
 
 
+def index_extracted_image(
+    objects_fits,
+    index_fits,
+    index_log = None,
+    extraction_info = None,
+    index_unique_key = None,
+    anet_bin_prefix = '',
+    log_prefix = '',
+):
+    if not index_log:
+        raise ValueError('index_log')
+    if not extraction_info:
+        raise ValueError('extraction_info')
+    if not index_unique_key:
+        raise ValueError('index_unique_key')
+
+    argv = [
+        anet_bin_prefix + 'build-astrometry-index',
+        '-i', objects_fits,
+        '-o', index_fits,
+        '-I', index_unique_key,
+        '-E',  # objects table is much less than all-sky
+        '-f',  # our sort column is flux-like, not mag-like
+        '-S', 'FLUX',
+        '-P', str(image_size_to_anet_preset(extraction_info.large_scale_deg)),
+    ]
+    logger.debug('%sindex command: %s', log_prefix, ' '.join(argv))
+
+    logger.info('%sGenerating Astrometry.Net index ...', log_prefix)
+
+    with open(index_log, 'wb') as log:
+        subprocess.check_call(
+            argv,
+            stdout = log,
+            stderr = subprocess.STDOUT,
+            shell = False,
+        )
+
+
 @dataclass
 class AlignmentConfig(object):
     scale_range_factor: float = 2.0
@@ -231,30 +270,18 @@ def go(
         # Generate the Astrometry.Net index
 
         index_fits = os.path.join(work_dir, f'index{fits_num}.fits')
-
-        argv = [
-            anet_bin_prefix + 'build-astrometry-index',
-            '-i', objects_fits,
-            '-o', index_fits,
-            '-I', str(fits_num),
-            '-E',  # objects table is much less than all-sky
-            '-f',  # our sort column is flux-like, not mag-like
-            '-S', 'FLUX',
-            '-P', str(image_size_to_anet_preset(info.large_scale_deg)),
-        ]
-        logger.debug('  index command: %s', ' '.join(argv))
-
         index_log = os.path.join(work_dir, f'build-index-{fits_num}.log')
-        logger.info('  Generating Astrometry.Net index ...')
 
         try:
-            with open(index_log, 'wb') as log:
-                subprocess.check_call(
-                    argv,
-                    stdout = log,
-                    stderr = subprocess.STDOUT,
-                    shell = False,
-                )
+            index_extracted_image(
+                objects_fits,
+                index_fits,
+                index_log = index_log,
+                extraction_info = info,
+                index_unique_key = str(fits_num),
+                anet_bin_prefix = anet_bin_prefix,
+                log_prefix = '  ',
+            )
         except Exception as e:
             logger.warning('  Failed to index this file')
             logger.warning('  Caused by: %s', e)
