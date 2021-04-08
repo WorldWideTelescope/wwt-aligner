@@ -27,19 +27,21 @@ from toasty.image import ImageLoader
 
 from . import logger
 
-DEFAULT_SOLVE_TIME_LIMIT = 90 # seconds
+DEFAULT_SOLVE_TIME_LIMIT = 30 # seconds
 
 def image_size_to_anet_preset(size_deg):
     """
     Get an astrometry.net "preset" size from an image size. Docs say:
 
-    0 => ~6 arcmin
+    0 => ~6 arcmin image width
     2 => ~12 arcmin
     4 => ~24 arcmin
 
-    etc.
+    etc. Our "size_deg" parameter is the diagonal size of the image,
+    which offsets the calculation by one step or so. The minimum
+    allowed preset is -5.
     """
-    return 6 + 2 * math.log2(size_deg)
+    return max(-5, int(np.floor(5 + 2 * math.log2(size_deg))))
 
 
 @dataclass
@@ -57,7 +59,7 @@ class ExtractionConfig(object):
     bg_box_size: int = 32
     bg_filter_size: int = 3
     bg_filter_threshold: float = 0.0
-    source_threshold: int = 3
+    source_threshold: int = 10
 
 def source_extract_fits(
     fits_path,
@@ -246,7 +248,7 @@ def go(
         index_fits_list.append(index_fits)
 
         this_scale_low = info.width_deg * 30  # (width in arcmin) / 2
-        this_scale_high = this_scale_low * 4  # (width in arcmin) * 2
+        this_scale_high = info.width_deg * 120  # (width in arcmin) * 2
 
         if scale_low is None:
             scale_low = this_scale_low
