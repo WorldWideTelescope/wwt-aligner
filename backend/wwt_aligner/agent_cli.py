@@ -163,24 +163,49 @@ class ArgsProtocolBuilder(object):
 def diagnostic_getparser(parser):
     subparsers = parser.add_subparsers(dest="diagnostic_subcommand")
 
+    p = subparsers.add_parser('plot-fits-index')
+    p.add_argument(
+        '--anet-bin-prefix',
+        default = '',
+        help = 'A prefix to apply to the names of Astrometry.Net programs to run',
+    )
+    p.add_argument(
+        'fits_path',
+        metavar = 'FITS-PATH',
+        help = 'The path to the input FITS file',
+    )
+
     p = subparsers.add_parser('plot-fits-sources')
     p.add_argument(
         'fits_path',
         metavar = 'FITS-PATH',
-        help = 'The path to input FITS file',
+        help = 'The path to the input FITS file',
     )
 
 def diagnostic_analyze_args(builder, settings):
     builder.add_arg(settings.diagnostic_subcommand)
 
-    if settings.diagnostic_subcommand == 'plot-fits-sources':
+    if settings.diagnostic_subcommand == 'plot-fits-index':
+        if settings.anet_bin_prefix:
+            builder.add_arg(f'--anet-bin-prefix={settings.anet_bin_prefix}')
+        builder.add_path_arg(settings.fits_path, pre_exists=True)
+    elif settings.diagnostic_subcommand == 'plot-fits-sources':
         builder.add_path_arg(settings.fits_path, pre_exists=True)
 
 def diagnostic_impl(settings):
-    if settings.diagnostic_subcommand == 'plot-fits-sources':
+    if settings.diagnostic_subcommand == 'plot-fits-index':
+        diagnostic_plot_fits_index_impl(settings)
+    elif settings.diagnostic_subcommand == 'plot-fits-sources':
         diagnostic_plot_fits_sources_impl(settings)
     else:
         die('must specify a diagnostic subcommand; run me with `--help` to see options')
+
+def diagnostic_plot_fits_index_impl(settings):
+    from .driver import plot_index
+    plot_index(
+        settings.fits_path,
+        anet_bin_prefix = settings.anet_bin_prefix,
+    )
 
 def diagnostic_plot_fits_sources_impl(settings):
     from .driver import plot_fits_sources

@@ -8,6 +8,7 @@ Main tool driver.
 __all__ = [
     'go',
     'plot_fits_sources',
+    'plot_index',
 ]
 
 from astropy.io import fits
@@ -222,6 +223,76 @@ def index_extracted_image(
             stderr = subprocess.STDOUT,
             shell = False,
         )
+
+
+def plot_index(
+    fits_path,
+    anet_bin_prefix = '',
+):
+    from astrometry.plot.plotstuff import Plotstuff
+    import shutil
+    import tempfile
+
+    # Sourcefind ...
+
+    try:
+        info = source_extract_fits(fits_path)
+    except Exception as e:
+        raise Exception(f'could not extract sources from `{fits_path}`') from e
+
+    work_dir = tempfile.mkdtemp()
+    objects_fits = os.path.join(work_dir, f'objects.fits')
+    info.wcs_objects.write(objects_fits, format='fits', overwrite=True)
+    index_fits = os.path.join(work_dir, f'index.fits')
+    index_log = os.path.join(work_dir, f'build-index.log')
+
+    # Index ...
+
+    try:
+        index_extracted_image(
+            objects_fits,
+            index_fits,
+            index_log = index_log,
+            extraction_info = info,
+            index_unique_key = '0',
+            anet_bin_prefix = anet_bin_prefix,
+        )
+    except Exception as e:
+        shutil.rmtree(work_dir)
+        raise Exception(f'could not index the sources from `{fits_path}') from e
+
+    # Plot!
+
+    with fits.open(fits_path) as hdul:
+        hdu = hdul[0]  # haack
+        wcs = WCS(hdu.header)
+        height, width = hdu.shape[-2:]
+        midx = width // 2
+        midy = height // 2
+        coords = wcs.pixel_to_world(
+            [midx, 0, width],
+            [midy, 0, height],
+        )
+        rdw = (coords[0].ra.deg, coords[0].dec.deg, coords[1].separation(coords[2]).deg)
+
+    plot = Plotstuff(outformat='png', size=(800, 800), rdw=rdw)
+    ind = plot.index
+    plot.color = 'white'
+    ind.add_file(index_fits)
+    ind.stars = True
+    ind.quads = True
+    ind.fill = False
+    plot.plot('index')
+    ind.stars = False
+    ind.fill = True
+    plot.alpha = 0.1
+    plot.plot('index')
+    plot.alpha = 0.5
+    plot.plot_grid(0.02, 0.02, 0.02, 0.02)
+
+    img_path = os.path.splitext(fits_path)[0] + '_index.png'
+    plot.write(img_path)
+    logger.debug('saved index image to `%s`', img_path)
 
 
 @dataclass
