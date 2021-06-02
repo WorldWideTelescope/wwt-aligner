@@ -61,6 +61,52 @@ jobs:
       tags: |
         $(DOCKER_DEPLOYMENT_TAG)
 
+- job: deploy_docs
+  pool:
+    vmImage: windows-latest
+  variables:
+  - group: Deployment Credentials
+  steps:
+  - template: azure-job-setup.yml
+
+  - bash: |
+      set -euo pipefail
+      if [[ ${isMainDev} == True ]] ; then
+        tag=latest
+      else
+        # Track the backend since that's where most of the action is
+        tag="$(cranko show version wwt_aligner |cut -d. -f1)"
+      fi
+      echo "docs deployment tag: $isMainDev, $isRelease => $tag"
+      echo "##vso[task.setvariable variable=DOCS_DEPLOYMENT_TAG;]$tag"
+    displayName: Determine deployment tag
+    env:
+      isMainDev: ${{ parameters.isMainDev }}
+      isRelease: ${{ parameters.isRelease }}
+
+  - task: AzureFileCopy@3
+    displayName: Deploy documentation
+    inputs:
+      SourcePath: '$(Pipeline.Workspace)/docs'
+      azureSubscription: 'aas@wwtadmindotnetfoundation'
+      Destination: 'AzureBlob'
+      storage: 'wwtwebstatic'
+      ContainerName: '$web'
+      blobPrefix: '_docs/aligner/$(DOCS_DEPLOYMENT_TAG)'
+
+  - task: AzurePowerShell@4
+    displayName: CDN purge - docs
+    inputs:
+      azureSubscription: 'aas@wwtadmindotnetfoundation'
+      azurePowerShellVersion: 'LatestVersion'
+      scriptType: 'inlineScript'
+      inline: |
+        Unpublish-AzCdnEndpointContent `
+          -ProfileName wwt-cdn-01 `
+          -ResourceGroupName wwt-web01 `
+          -EndpointName wwtwebdocs-prod `
+          -PurgeContent '/aligner/$(DOCS_DEPLOYMENT_TAG)/*'
+
 # Jobs that only run for releases
 
 - ${{ if parameters.isRelease }}:
@@ -107,7 +153,7 @@ jobs:
     pool:
       vmImage: ubuntu-20.04
     variables:
-      - group: Deployment Credentials
+    - group: Deployment Credentials
     steps:
     - template: azure-job-setup.yml
       parameters:
@@ -116,7 +162,10 @@ jobs:
         set -xeou pipefail
         git fetch $(Pipeline.Workspace)/git-gh-pages/gh-pages.bundle gh-pages
         git branch -f gh-pages FETCH_HEAD
-        git push --force origin gh-pages:gh-pages
-      displayName: Update GitHub pages website
+
+        if cranko show if-released --exit-code wwt-aligner-frontend; then
+          git push --force origin gh-pages:gh-pages
+        fi
+      displayName: Maybe update GitHub pages website
       env:
         GITHUB_TOKEN: $(GITHUB_TOKEN)

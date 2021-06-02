@@ -1,3 +1,10 @@
+# wwt-aligner-frontend 0.4.0 (2021-06-02)
+
+- Add support for the `wwt-aligner preview` command. This command includes some
+  special plumbing to allow you to preview the WWT-formatted version of a
+  processed image using your computer’s web browser.
+
+
 # wwt-aligner-frontend 0.3.0 (2021-03-02)
 
 - Lots of work towards trying to reach basic functionality.
