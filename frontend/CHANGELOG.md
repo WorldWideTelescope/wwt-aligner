@@ -1,5 +1,12 @@
 # rc: minor bump
 
+- Add support for the `wwt-aligner preview` command. This command includes some
+  special plumbing to allow you to preview the WWT-formatted version of a
+  processed image using your computer’s web browser.
+
+
+# wwt-aligner-frontend 0.3.0 (2021-03-02)
+
 - Lots of work towards trying to reach basic functionality.
 - Making a release now to test out the GitHub pages deployment automation.
 
