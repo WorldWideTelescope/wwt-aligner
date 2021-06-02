@@ -8,6 +8,7 @@ Main tool driver.
 __all__ = [
     'go',
     'plot_fits_sources',
+    'plot_index',
 ]
 
 from astropy.io import fits
@@ -26,8 +27,6 @@ from toasty.builder import Builder
 from toasty.image import ImageLoader
 
 from . import logger
-
-DEFAULT_SOLVE_TIME_LIMIT = 30 # seconds
 
 def image_size_to_anet_preset(size_deg):
     """
@@ -144,14 +143,17 @@ def source_extract_fits(
 def plot_fits_sources(fits_path):
     import matplotlib.pyplot as plt
     from matplotlib.patches import Ellipse
-    from matplotlib import rcParams
-
-    rcParams['figure.figsize'] = [14., 14.]
 
     try:
         info = source_extract_fits(fits_path)
     except Exception as e:
         raise Exception(f'could not extract sources from `{fits_path}`') from e
+
+    # Get the figure to have about as many pixels as the image
+
+    from matplotlib import rcParams
+    DPI = 72
+    rcParams['figure.figsize'] = [info.width_pixels / DPI, info.height_pixels / DPI]
 
     # This stuff derived from the SEP documentation.
 
@@ -184,6 +186,130 @@ def plot_fits_sources(fits_path):
     logger.debug('saved sources image to `%s`', img_path)
 
 
+def index_extracted_image(
+    objects_fits,
+    index_fits,
+    index_log = None,
+    extraction_info = None,
+    index_unique_key = None,
+    anet_bin_prefix = '',
+    log_prefix = '',
+):
+    if not index_log:
+        raise ValueError('index_log')
+    if not extraction_info:
+        raise ValueError('extraction_info')
+    if not index_unique_key:
+        raise ValueError('index_unique_key')
+
+    argv = [
+        anet_bin_prefix + 'build-astrometry-index',
+        '-i', objects_fits,
+        '-o', index_fits,
+        '-I', index_unique_key,
+        '-E',  # objects table is much less than all-sky
+        '-f',  # our sort column is flux-like, not mag-like
+        '-S', 'FLUX',
+        '-P', str(image_size_to_anet_preset(extraction_info.large_scale_deg)),
+    ]
+    logger.debug('%sindex command: %s', log_prefix, ' '.join(argv))
+
+    logger.info('%sGenerating Astrometry.Net index ...', log_prefix)
+
+    with open(index_log, 'wb') as log:
+        subprocess.check_call(
+            argv,
+            stdout = log,
+            stderr = subprocess.STDOUT,
+            shell = False,
+        )
+
+
+def plot_index(
+    fits_path,
+    anet_bin_prefix = '',
+):
+    from astrometry.plot.plotstuff import Plotstuff
+    import shutil
+    import tempfile
+
+    # Sourcefind ...
+
+    try:
+        info = source_extract_fits(fits_path)
+    except Exception as e:
+        raise Exception(f'could not extract sources from `{fits_path}`') from e
+
+    work_dir = tempfile.mkdtemp()
+    objects_fits = os.path.join(work_dir, f'objects.fits')
+    info.wcs_objects.write(objects_fits, format='fits', overwrite=True)
+    index_fits = os.path.join(work_dir, f'index.fits')
+    index_log = os.path.join(work_dir, f'build-index.log')
+
+    # Index ...
+
+    try:
+        index_extracted_image(
+            objects_fits,
+            index_fits,
+            index_log = index_log,
+            extraction_info = info,
+            index_unique_key = '0',
+            anet_bin_prefix = anet_bin_prefix,
+        )
+    except Exception as e:
+        shutil.rmtree(work_dir)
+        raise Exception(f'could not index the sources from `{fits_path}') from e
+
+    # Plot!
+
+    with fits.open(fits_path) as hdul:
+        hdu = hdul[0]  # haack
+        wcs = WCS(hdu.header)
+        height, width = hdu.shape[-2:]
+        midx = width // 2
+        midy = height // 2
+        coords = wcs.pixel_to_world(
+            [midx, 0, width],
+            [midy, 0, height],
+        )
+        rdw = (coords[0].ra.deg, coords[0].dec.deg, coords[1].separation(coords[2]).deg)
+
+    plot = Plotstuff(outformat='png', size=(800, 800), rdw=rdw)
+    ind = plot.index
+    plot.color = 'white'
+    ind.add_file(index_fits)
+    ind.stars = True
+    ind.quads = True
+    ind.fill = False
+    plot.plot('index')
+    ind.stars = False
+    ind.fill = True
+    plot.alpha = 0.1
+    plot.plot('index')
+    plot.alpha = 0.5
+    plot.plot_grid(0.02, 0.02, 0.02, 0.02)
+
+    img_path = os.path.splitext(fits_path)[0] + '_index.png'
+    plot.write(img_path)
+    logger.debug('saved index image to `%s`', img_path)
+
+
+@dataclass
+class AlignmentConfig(object):
+    scale_range_factor: float = 2.0
+    """How to set the ANet scale-low and scale-high parameters, based on the
+    widths of the reference FITS images."""
+
+    solve_time_limit_seconds: int = 30
+    "The CPU time limit for the solver, in seconds."
+
+    downsample_factor: int = 2
+    "How much to downsample the source RGB image for sourcefinding"
+
+    object_limit: int = 1000
+    "Limit the number of objects processed from the RGB image"
+
 def go(
     fits_paths = None,
     rgb_path = None,
@@ -195,6 +321,7 @@ def go(
     """
     Do the whole thing.
     """
+    cfg = AlignmentConfig()
     index_fits_list = []
     scale_low = scale_high = None
 
@@ -214,30 +341,18 @@ def go(
         # Generate the Astrometry.Net index
 
         index_fits = os.path.join(work_dir, f'index{fits_num}.fits')
-
-        argv = [
-            anet_bin_prefix + 'build-astrometry-index',
-            '-i', objects_fits,
-            '-o', index_fits,
-            '-I', str(fits_num),
-            '-E',  # objects table is much less than all-sky
-            '-f',  # our sort column is flux-like, not mag-like
-            '-S', 'FLUX',
-            '-P', str(image_size_to_anet_preset(info.large_scale_deg)),
-        ]
-        logger.debug('  index command: %s', ' '.join(argv))
-
         index_log = os.path.join(work_dir, f'build-index-{fits_num}.log')
-        logger.info('  Generating Astrometry.Net index ...')
 
         try:
-            with open(index_log, 'wb') as log:
-                subprocess.check_call(
-                    argv,
-                    stdout = log,
-                    stderr = subprocess.STDOUT,
-                    shell = False,
-                )
+            index_extracted_image(
+                objects_fits,
+                index_fits,
+                index_log = index_log,
+                extraction_info = info,
+                index_unique_key = str(fits_num),
+                anet_bin_prefix = anet_bin_prefix,
+                log_prefix = '  ',
+            )
         except Exception as e:
             logger.warning('  Failed to index this file')
             logger.warning('  Caused by: %s', e)
@@ -247,8 +362,8 @@ def go(
 
         index_fits_list.append(index_fits)
 
-        this_scale_low = info.width_deg * 30  # (width in arcmin) / 2
-        this_scale_high = info.width_deg * 120  # (width in arcmin) * 2
+        this_scale_low = info.width_deg * 60 / cfg.scale_range_factor  # units are image width in arcmin
+        this_scale_high = info.width_deg * 60 * cfg.scale_range_factor
 
         if scale_low is None:
             scale_low = this_scale_low
@@ -283,12 +398,13 @@ def go(
         '--scale-units', 'arcminwidth',
         '--scale-low', str(scale_low),
         '--scale-high', str(scale_high),
-        '--cpulimit', str(DEFAULT_SOLVE_TIME_LIMIT),  # seconds
+        '--cpulimit', str(cfg.solve_time_limit_seconds),
+        '--objs', str(cfg.object_limit),
         '--dir', work_dir,
         '-N', wcs_file,
         '--no-plots',
         '--no-tweak',
-        '--downsample', '2',  # XXX this should probably not be hardcoded
+        '--downsample', str(cfg.downsample_factor),
         rgb_path,
     ]
     logger.debug('solve command: %s', ' '.join(argv))
