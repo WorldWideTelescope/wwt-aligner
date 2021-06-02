@@ -30,14 +30,16 @@ The main documentation may be [found here][docs].
 The development of `wwt-aligner` was sponsored by the Space Telescope Science
 Institute.
 
-The AAS WorldWide Telescope (WWT) system is a [.NET Foundation][dnf] project.
-Work on WWT and pywwt has been supported by the [American Astronomical
-Society][aas] (AAS), the US [National Science Foundation][nsf] (grants [1550701]
-and [1642446]), the [Gordon and Betty Moore Foundation][moore], and
-[Microsoft][msft].
+The AAS WorldWide Telescope (WWT) system is a [.NET Foundation][dnf] project
+brought to you by the [American Astronomical Society][aas] (AAS). Work on WWT
+has been supported by those organizations, the [National Science
+Foundation][nsf], the [Gordon and Betty Moore Foundation][moore], and
+[Microsoft][msft]. For more information see [the WWT
+Acknowledgments][acknowledgments].
 
+[dnf]: https://dotnetfoundation.org/
+[aas]: https://aas.org/
 [nsf]: https://www.nsf.gov/
-[1550701]: https://www.nsf.gov/awardsearch/showAward?AWD_ID=1550701
-[1642446]: https://www.nsf.gov/awardsearch/showAward?AWD_ID=1642446
 [moore]: https://www.moore.org/
 [msft]: https://microsoft.com/
+[acknowledgments]: https://worldwidetelescope.org/about/acknowledgments/
